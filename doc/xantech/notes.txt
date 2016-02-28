@@ -1,0 +1,7 @@
+CI is control input
+RC68PLUS 
+291-KIT ir receiver connector kit $90
+SR21 $113
+CC12 $113
+tip is ir sleeve ground
+

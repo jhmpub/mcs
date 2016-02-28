@@ -1,0 +1,13 @@
+layout
+~~~~~~
+
+room: den,living room 
+watch: channel, dvd, stream
+
+channel: hgtv, comedy, pbs, travel, ###
+         mute, volume up, volume down, volume slider, surround sound
+         ### keypad
+         
+dvd: play, pause, mute, stop, eject, volume up, volume down, volume slider, display, ok, menu
+
+stream: play, pause, mute, stop, volume up, volume down, volume slider, vnc          
