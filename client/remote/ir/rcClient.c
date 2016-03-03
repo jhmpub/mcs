@@ -52,7 +52,7 @@
 // 2009 Apr 10 jhm added IR cmd translations for videolan 
 //                 media player
 // 2013 Apr 28 jhm added IR cmd translations for windows media center
-// 2015 Dec 24 jhm added a thread to listen for mute and audio source notifications
+// 2015 Dec 24 jhm added a thread to listen for audio control notifications
 //
 
 // SendInput() is only declared for Windows XP and later
@@ -644,15 +644,15 @@ void dispatchThread()
 
 // setNextForegroundWindow uses GetNextWindow and GetWindowText to 
 // maintain a list of windows that partially match an entry in the 
-// dirList array.  After updating the list the next round-robin
+// titleList array.  After updating the list the next round-robin
 // entry in the list is used to call SetForegroundWindow.  If no windows
 // with partially matching titles exist, SetForegroundWindow is not called.
 //
-// Although dirList can contain any arbitrary window title, the intended
+// Although titleList can contain any arbitrary window title, the intended
 // use is to iterate over explorer windows.  In order to differentiate
 // explorer windows, it is important for the title to fully qualify the
-// current path.  Go to Organize/Folder Options/View and check
-// "Display the full path in the title bar (Classic theme only)"
+// current path.  In any explorer window, go to Organize/Folder Options/View 
+// and check "Display the full path in the title bar (Classic theme only)"
 
 void setNextForegroundWindow() {
    unsigned i, j, titleLen;
@@ -667,14 +667,14 @@ void setNextForegroundWindow() {
    for (i=0; i<sizeof(windowList)/sizeof(struct windowList); i++)
       windowList[i].count=0;
    
-   // iterate through every desktop window.  If a dirList entry
+   // iterate through every desktop window.  If a titleList entry
    // partially matches a window's title, save the window's handle
    // to a windowList struct and increment the count 
    while(hWnd) {
       titleLen = GetWindowText(hWnd, title, sizeof(title));
-      for (i=0; titleLen>0 && i<sizeof(dirList)/sizeof(char *); i++) {
-         if (strstr(title,dirList[i])) {
-            // this window's title matches or is a subdirectory of dirList[i]
+      for (i=0; titleLen>0 && i<sizeof(titleList)/sizeof(char *); i++) {
+         if (strstr(title,titleList[i])) {
+            // this window's title matches or is a subdirectory of titleList[i]
             for (j=0; j<sizeof(windowList)/sizeof(struct windowList); j++) {
                if (strstr(windowList[j].title, title) ||
                    !windowList[j].title[0]) {
@@ -721,7 +721,9 @@ void setNextForegroundWindow() {
    if (hWndNext==NULL && 
        windowList[0].count &&
        hWndFG != windowList[0].hWnd) {
-      // set hWndNext to the first matching window 
+      // a next window was not found because the current foreground window 
+      // does not match anything in titleList so set the next handle to the 
+      // first window in the list
       hWndNext = windowList[0].hWnd;
       titleNext = windowList[0].title;
    }
@@ -753,8 +755,7 @@ HANDLE initExitHandler() {
 LRESULT WINAPI exitHandler(HWND hwnd, 
                            UINT msg, 
                            WPARAM wParam, 
-                           LPARAM lParam) 
-{
+                           LPARAM lParam) {
     switch(msg) {
        case WM_ENDSESSION:
        case WM_CLOSE:

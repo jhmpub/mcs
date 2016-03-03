@@ -462,10 +462,10 @@ static struct translation {
 static struct windowList {
     char title[1024];
     HWND hWnd;
-    unsigned count;  // number of windows matching the given title
+    unsigned count;  // number of windows partially matching an entry in titleList
 } windowList[256];
 
-static char * dirList[] = {
+static char * titleList[] = {
    "I:\\Recorded TV",
    "I:\\home\\jhm\\video\\lnk"
 };
