@@ -1,7 +1,7 @@
 // This program serves as a remote control agent (rcAgent) that runs as a
 // backround process for universal ir and smart remotes.  If a translation
 // is found for a command, this process will either forward the command
-// as an IP datagram to the Amplifier Control Server or synthesize pressing
+// as an IP datagram to the audio receiver agent or synthesize pressing
 // a shortcut key to the window that has focus.  This process also maintains
 // TV and DVD state information for remote clients.
 //
@@ -44,10 +44,7 @@
 // Build Information
 // Build the targets with the build.bat script in the directory with this file.
 // The rcAgent target is built to run as a detached windows background
-// process during startup.  The -mno-cygwin -mwindows options compile 
-// and link using MinGW.  The MinGW option comes with a Cygwin installation 
-// if all the development tools are installed. The rcAgentConsole target 
-// is used for debugging.
+// process during startup.  The rcAgentConsole target is used for debugging.
 //
 // 2008 Sep 10 jhm original creation
 // 2009 Apr 10 jhm added IR cmd translations for videolan 

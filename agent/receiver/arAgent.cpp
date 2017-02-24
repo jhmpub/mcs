@@ -37,14 +37,12 @@
  *    as a GUI for sending TCP command messages to this server
  *
  * The arAgent target is built to run as a detached windows background 
- * process during startup or as a service.  The -mno-cygwin -mwindows 
- * options facilitate receiving the WM_ENDSESSION message by compiling and 
- * linking using minGW.  MinGW's philosophy differs from cygwin by using
- * native windows library support whereas Cygwin strives to provide complete
- * POSIX support.  The MinGW option comes with a Cygwin installation 
- * if all the development tools are installed.  The arAgentConsole target 
- * is used for debugging.
- *
+ * process during startup or as a service.  The MinGW compiler creates
+ * the arAgent target that handles Windows messaging.
+ * MinGW's philosophy differs from cygwin by using native windows library 
+ * support whereas Cygwin strives to provide complete POSIX support.  
+ * The arAgentConsole target created by the Cygwin compiler is used 
+ * for debugging.
  */  
  
 #include <winsock2.h>

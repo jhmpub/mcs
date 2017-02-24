@@ -1,0 +1,5 @@
+Application=aragent.exe -delay 30
+Description=Audio Receiver Agent converts text string commands from TCP/IP to a USB IR transmitter
+DisplayName=Audio Receiver Agent
+ServiceName=arAgent
+
