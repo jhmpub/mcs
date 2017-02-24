@@ -1,2 +1,6 @@
-rem built with cygwin gcc - http://www.cygwin.com
-gcc -mno-cygwin -mwindows -o msg msg.c -l wsock32
+rem built with mingw gcc - http://mingw.org
+set BIN=%PROGRAM_DRIVE%\pkg\win32\mingw\bin
+%BIN%\gcc -g -DNO_COMMON -DNO_MCS -c ..\..\common\socket.cpp
+%BIN%\gcc -g -c msg.cpp
+%BIN%\gcc -g -static -o msg msg.o socket.o -lws2_32 -lstdc++
+rm.exe *.o

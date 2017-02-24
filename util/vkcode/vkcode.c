@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <windows.h>
 
 static unsigned control;

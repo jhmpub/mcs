@@ -1,5 +1,0 @@
-Application=acserver.exe -delay 30
-Description=Audio Control Server accepts UDP datagram requests and sends them out a USB port to an IR transmitter
-DisplayName=Audio Control Server
-ServiceName=acServer
-

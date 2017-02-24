@@ -41,6 +41,7 @@ unless ($raas{'ServiceName'}) {
    $raas{'ServiceName'} =~ s/\.[^\.]+$//;
 }   
 
+
 print "\nInstalling ".$raas{'ServiceName'}." as a service ";
 
 open RESULT, $instsrv." ".$raas{'ServiceName'}." ".$srvany." | ";
@@ -59,7 +60,7 @@ if ($success) {
       { Access=>KEY_ALL_ACCESS, Delimiter=>"\\" };
    $service->SetValue("Description", $raas{'Description'}, "REG_SZ") if $raas{'Description'}; 
    $service->SetValue("DisplayName", $raas{'DisplayName'}, "REG_SZ") if $raas{'DisplayName'}; 
-
+   
    # set the startup directory to the current working directory and fully qualified path to the application
    $service->CreateKey("Parameters");
    $parameters = new Win32::TieRegistry 
@@ -67,12 +68,18 @@ if ($success) {
       { Access=>KEY_ALL_ACCESS, Delimiter=>"\\" };
    $parameters->SetValue("AppDirectory", $appDir); 
    $parameters->SetValue("Application", $appDir."\\".$raas{'Application'});
-
-   print "succeeded\n\n".
-         "Notes: 1. go to the services panel and change the ".$raas{'ServiceName'}." Log On\n".
-         "          to Local System account\n".
-         "       2. the \"".$raas{'DisplayName'}."\" display name will not appear in the\n".
-         "          services panel until after reboot\n";
+   print "succeeded\n\n";
+   if ($raas{'DisplayName'}) {
+        
+      print "Notes: 1. reboot to refresh the services panel from the registry\n".
+            "       2. go to the services panel and change the ".$raas{'DisplayName'}." Log On\n".
+            "          to Local System account\n".
+            "       3. net start ".$raas{'ServiceName'}."\n"; 
+    } else {    
+      print "Notes: 1. go to the services panel and change the ".$raas{'DisplayName'}." Log On\n".
+            "          to Local System account\n".
+            "       2. net start ".$raas{'ServiceName'}."\n"; 
+    }    
 } else {
    print "failed\n";
    foreach (@result) { print; }
