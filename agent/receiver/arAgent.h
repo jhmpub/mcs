@@ -98,12 +98,10 @@ int isDspEffectToggleEnabled(void);
 LRESULT WINAPI windowsModeExitHandler(HWND, UINT, WPARAM, LPARAM);
 
 const char * tira_dll_absolute_path = "c:\\utils\\startup\\local\\acserver\\tira2.dll";
-const char * moduleName = "arAgent";
 
 SOCKADDR saClient;
 
 struct dsp * getDsp(void);
-struct irCmd * cmdIdToIrCmd(int);
 
 void activateSpeakerMenu(const char *);
 void ampInit(void);
@@ -114,10 +112,10 @@ void initConsoleModeExitHandler(void);
 void initDefaultInputSourceDspProgram(void);
 void initStartupDelay(int);
 void irSend(const char *);
+void irSend(QueuedMsg *);
 void loadTiraDll(void);
 void printErrorAndExit(char *);
-void printIrCmd(struct irCmd *);
-void printWinsockError(char *);
+void printTiraCmd(struct tiraCmd *);
 void setInputSourceDspEffect(void);
 void setLFE(int);
 void setSurroundProfile(int);

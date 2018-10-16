@@ -1,10 +1,10 @@
 // This utility is an Audio Control client that provides buttons for sending
 // TCP messages to the Audio Receiver Agent
 //
-// Run with 
-// javaw -jar acClient.jar 
+// Run with (-s option displays surround sound panel control) 
+// javaw -jar acClient.jar [-s]
 // or to see debug messages
-// java -jar acClient.jar
+// java -jar acClient.jar [-s]
 //
 // 2004 Aug  7 jhm original creation
 // 2016 Jun 29 jhm converted messaging from UDP to TCP for smart remote 
@@ -28,7 +28,7 @@ public class AcClient extends JFrame
                       
     private static String agentHostname = "jimson";
     //private static final String agentHostname = "georgia";
-    private static final int MEDIA_CONTROL_PORT = 2000;
+    private static final int AUDIO_CONTROL_PORT = 2200;
     
     // computerSources hosts have a digital audio output link into the amplifier
     protected ArrayList<String> computerSources = 
@@ -40,7 +40,7 @@ public class AcClient extends JFrame
     protected static boolean restoreReceiverStatePending=false;
     protected static String applicationName;
     protected RxClient rxClient;
-    protected TcpConnection arAgent = new TcpConnection(agentHostname, MEDIA_CONTROL_PORT);
+    protected TcpConnection arAgent = new TcpConnection(agentHostname, AUDIO_CONTROL_PORT);
     String localHostname = GlobalUtilities.GetLocalHostname();
     
     protected ArrayList<JButton> fmButtons = new ArrayList<JButton>();
@@ -89,8 +89,8 @@ public class AcClient extends JFrame
         createArCmdGrouped(3,  0, 1, 1, 1, 1, "KCRB",  "fm4", fmButtons);     // A4 90.9
         createArCmdGrouped(4,  0, 1, 1, 1, 1, "95.5",  "fm5", fmButtons);     // A5
         createArCmdGrouped(5,  0, 1, 1, 1, 1, "95.9",  "fm6", fmButtons);     // A6
-        createArCmdGrouped(6,  0, 1, 1, 1, 1, "96.7",  "fm7", fmButtons);     // A7
-        createArCmdGrouped(7,  0, 1, 1, 1, 1, "102.7", "fm8", fmButtons);     // A8
+        createArCmdGrouped(6,  0, 1, 1, 1, 1, "102.7", "fm7", fmButtons);     // A7
+        createArCmdGrouped(7,  0, 1, 1, 1, 1, "103.5", "fm8", fmButtons);     // A8
         
         createArCmdGrouped(0,  1, 2, 2, 1, 2, "Computer", localHostname, inputButtons);
         createArCmdGrouped(2,  1, 2, 2, 1, 2, "Radio", "fm", inputButtons);

@@ -1,19 +1,95 @@
-A sendir command is comprised of:
+The IR Blaster is best for applications that transmit IR commands across a 
+room.  Emitters are best stuck onto the IR eye of a device for individual 
+control.
+
+When done collecting sendir commands in itach_codes.cmd, run the perl script 
+itach_header.pl > ..\..\agent\remote\itach.h to generate the c language 
+header file used by the remote control agent and the itach demo.exe utility.  
+
+Note the format of the itach_codes.cmd file:
+
+the "rem" line defines the name of the sendir set with 3 subsequent sendir lines:
+rem <header file variable name>
+sendir <tv cmd code>
+sendir <dvd cmd code>
+sendir <vcr cmd code>
+
+This is a general tutorial for defining the remote control agent itach.h header
+file.  Reference mcs\doc\itach\itach_api.pdf for in depth information.  
+Section "5.4.6 Sending IR" is the best resource for complete sendir specification 
+information.
+
+The following example is intended to illustrate capturing a single sendir 
+command for the itach_codes.cmd file.  
+
+First, some sendir background is needed.  The sendir command is defined by:
 
 sendir,<connectorAddress>,<id>,<frequency>,<repeat>,<offset>,<on cycles>,<off cycles>,...<on cycles><large off cycles>
 
-subsequent
+connectorAddress: Plugging the blaster into the rightmost port is defined as 1:3 (module 1, connector 3)
+              id: not significant to the remote control agent.  making this unique may aid troubleshooting
+       frequency: determined by iLearn
+          repeat: 2 works well without detecting duplicates
+          offset: used to not resend the preamble.  look for a repeating pattern to determine offset.
 
-<on cycles>,<off cycles>,...<on cycles><large off cycles>
 
-are not necessary e.g.
+Capturing IR Commands
+~~~~~~~~~~~~~~~~~~~~~
+Run iLearn.exe
+set IR Learner pull down to "iTach Learner"
+set the IP Address
+Connect
+set the Capture options Connector to match the jack the blaster is plugged
+(rightmost jack is Connector 3)
+point the IR remote at the hole to right of the DC power jack.
+iLearn should capture the code in the "Learned Code" dialog:
+Note: if no ir codes are detected, hold a button down while pointing at the 
+      receiver should kick the itach device into learning mode 
+Edit to copy the Learned Code into the Edit View dialog
+Send IR to confirm the captured IR code works
+select all the text in the "Edit View" dialog and paste those codes into the 
+relevant section in the itach_codes.cmd file
 
-sendir,1:3,4,36764,1,1,
-128,64,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,47,17,15,17,15,17,15,17,15,17,47,17,2738,
-128,64,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,47,17,15,17,15,17,15,17,15,17,47,17,2738,
-128,64,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,47,17,15,17,15,17,15,17,15,17,47,17,4705
+sendir,1:3,1,40192,1,1,
+97,23,49,23,25,23,49,23,25,23,49,23,25,23,25,23,25,23,49,23,25,23,25,23,25,1032,
+97,23,49,23,25,23,49,23,25,23,49,23,25,23,25,23,25,23,49,23,25,23,25,23,25,1033,
+97,23,49,23,25,23,49,23,25,23,49,23,25,23,25,23,25,23,49,23,25,23,25,23,25,1034,
+97,23,49,23,25,23,49,23,25,23,49,23,25,23,25,23,25,23,49,23,25,23,25,23,25,5144
 
-can be reduced to:
+This capture repeats the <on cycles> <off cycles> ... lines 1 time with an 
+offset of 1.
 
-sendir,1:3,4,36764,1,1,128,64,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,47,17,15,17,15,17,15,17,15,17,15,17,47,17,15,17,47,17,15,17,15,17,15,17,15,17,47,17,2738
+
+Confirming Captured Commands
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Run iTest.exe 
+Set the IP Address
+Connect
+check "Add Carriage Return"
+Paste the sendir command into the "Command String" dialog box and click Send.
+
+This should transmit the IR code to the device for confirmation. 
+
+Run "mcs\agent\remote\rcAgentConsole.exe -d" to launch the remote control agent
+in debug mode.  Assuming the tira device initializes correctly it will print out 
+received IR codes from an iTest send:
+ 
+irRx match found 16.57.58: 231700000000 -> ir vcr power
+irRx discarding duplicate 16.57.58: 231700000000 -> ir vcr power
+
+In this case the tira sees one duplicate from the captured irSend command.
+The captured sendir command can be shortened and condensed to just repeat 
+the second line of <on cycles> <off cycles> to 2 times:
+
+sendir,1:3,1,40192,2,1,
+97,23,49,23,25,23,49,23,25,23,49,23,25,23,25,23,25,23,49,23,25,23,25,23,25,1032
+
+This results in the remote control agent getting a callback with a consistent 
+ir code:
+
+irRx match found 16.58.14: 231700000000 -> ir vcr power
+
+If the shortened command is intended to control a device it should also be
+tested to confirm it still works.
+
 

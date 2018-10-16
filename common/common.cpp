@@ -1,22 +1,11 @@
-#include <ctype.h>
 #include <winsock2.h>
-#include <winuser.h>
+#include <windows.h>  // after winsock2 to prevent including winsock.h
+#include <ctype.h>
 #include <stdio.h>
-#include <unistd.h>
-#include "tira.h"
-#include "xantech_codes.h"
-#include "yamaha_codes.h"
 #include "common.h"
 #include "socket.h"
-#include "common.h"
-#include "xantech_codes.c"
-#include "yamaha_codes.c"
-#include "hdmi_switch_codes.c"
-
-#ifdef CONSOLE_MODE
-#include <termios.h>
-static struct termios old_tio, new_tio;
-#endif
+#include "tira_dll.h"
+#include "tira_tx.c"
 
 // tira dll function pointers
 tira_init_t              tira_init;
@@ -38,555 +27,38 @@ int subwooferVolume=EFFECT_VOLUME_MAX;
 int surroundRightVolume=EFFECT_VOLUME_MAX;
 int surroundLeftVolume=EFFECT_VOLUME_MAX;
 
-int debug=FALSE;
-int initializing=FALSE;
+int audioPowerState;
 int audioSource=VIDEO_AUX;
-int station=FM1;
-int currentEffectSpeaker=0;
-int audioPowerState, muteState=MUTE_OFF;
-int registrationCount=0, surroundProfile=SURROUND_STD;
-int channel_a_director=CHANNEL_A_TO_FRONT_SPEAKERS;
-int rear_speaker_selector=REAR_SPEAKERS_FROM_CHANNEL_A;
-int channel_a_relay=CHANNEL_A_OFF;
-int bSpeakerState=CHANNEL_B_OFF;
-int subwoofer_relay=SUBWOOFER_OFF;
-int center_speaker_relay=CENTER_SPEAKER_OFF;
-int subwooferState, LFE_State;
-int rearSpeakerState=REAR_SPEAKERS_OFF;
-int frontSpeakerState=FRONT_SPEAKERS_OFF; 
+int exiting=FALSE;
 int hdmiSwitchState=UNDEFINED;
-int ttyExit=FALSE;
+int initializing=FALSE;
+int muteState=MUTE_OFF;
+int registrationCount=0;
+int station=FM1;
+int surroundProfile=SURROUND_STD;
 int undefined=UNDEFINED;
 
-#define VK_Q  0x51
-#define VK_CR 0x0D
-#define SC_Q  0x10
-#define SC_CR 0x1C
+static int force_exit=FALSE;
+static volatile const char * lock=NULL;
 
-INPUT_RECORD inputQ[3] = {
-   KEY_EVENT,
-   {TRUE, 1, VK_CR, SC_CR, '\r', 0},
-   KEY_EVENT,
-   {TRUE, 1, VK_Q, SC_Q, 'q', 0},
-   KEY_EVENT,
-   {TRUE, 1, VK_CR, SC_CR, '\r', 0},
-};   
-
-HMODULE handle = 0;
-
-struct serverState {
-   int rearSpeakerState; 
-   int frontSpeakerState; 
-   int bSpeakerState;
-   int audioSource;
-} serverState, *preserved=NULL;
+// speaker state
+int bSpeakerState=CHANNEL_B_OFF;
+int center_speaker_relay=CENTER_SPEAKER_OFF;
+int channel_a_director=CHANNEL_A_TO_FRONT_SPEAKERS;
+int channel_a_relay=CHANNEL_A_OFF;
+int currentEffectSpeaker=0;
+int frontSpeakerState=FRONT_SPEAKERS_OFF; 
+int rear_speaker_selector=REAR_SPEAKERS_FROM_CHANNEL_A;
+int rearSpeakerState=REAR_SPEAKERS_OFF;
+int subwoofer_relay=SUBWOOFER_OFF;
+int subwooferState, LFE_State;
 
 
-struct tiraCmd tiraCmd[] = { 
+HMODULE tiraDLL = NULL;
 
-   // yamaha receiver commands
-   {UNDEFINED,
-    SZ_UNDEFINED,
-    &undefined,
-    0,
-    NULL},
-    
-   {AUDIO_POWER_ON,
-    SZ_AUDIO_POWER_ON,
-    &audioPowerState,
-    sizeof(irPowerOn),
-    irPowerOn},
-    
-   {AUDIO_POWER_OFF,
-    SZ_AUDIO_POWER_OFF,
-    &audioPowerState,
-    sizeof(irPowerOff),
-    irPowerOff},
-    
-   {GEORGIA,
-    SZ_GEORGIA,
-    &audioSource,
-    sizeof(irCD),
-    irCD},
-    
-   {JIMSON,
-    SZ_JIMSON,
-    &audioSource,
-    sizeof(irCblSat),
-    irCblSat},
-    
-   {LVR_MM,
-    SZ_LVR_MM,
-    &audioSource,
-    sizeof(irCDR),
-    irCDR},
-    
-   {DEN_MM,
-    SZ_DEN_MM,
-    &audioSource,
-    sizeof(irVideoAux),
-    irVideoAux},
-    
-   {FM,
-    SZ_FM,
-    &audioSource,
-    sizeof(irFm),
-    irFm},
-    
-   {TV,
-    SZ_TV,
-    &audioSource,
-    sizeof(irTv),
-    irTv},
-    
-   {DVD,
-    SZ_DVD,
-    &audioSource,
-    sizeof(irDvd),
-    irDvd},
-    
-   {DVR,
-    SZ_DVR,
-    &audioSource,
-    sizeof(irCDR),
-    irCDR},
-    
-   {VIDEO_AUX,
-    SZ_VIDEO_AUX,
-    &audioSource,
-    sizeof(irVideoAux),
-    irVideoAux},
-    
-   {FM1,
-    SZ_FM1,
-    &station,
-    sizeof(irFm1),
-    irFm1},
-    
-   {FM2,
-    SZ_FM2,
-    &station,
-    sizeof(irFm2),
-    irFm2},
-    
-   {FM3,
-    SZ_FM3,
-    &station,
-    sizeof(irFm3),
-    irFm3},
-    
-   {FM4,
-    SZ_FM4,
-    &station,
-    sizeof(irFm4),
-    irFm4},
-    
-   {FM5,
-    SZ_FM5,
-    &station,
-    sizeof(irFm5),
-    irFm5},
-    
-   {FM6,
-    SZ_FM6,
-    &station,
-    sizeof(irFm6),
-    irFm6},
-    
-   {FM7,
-    SZ_FM7,
-    &station,
-    sizeof(irFm7),
-    irFm7},
-    
-   {FM8,
-    SZ_FM8,
-    &station,
-    sizeof(irFm8),
-    irFm8},
-    
-   {MUTE_ON,
-    SZ_MUTE_ON,
-    &muteState,
-    sizeof(irMuteToggle),
-    irMuteToggle},
-    
-   {MUTE_OFF,
-    SZ_MUTE_OFF,
-    &muteState,
-    sizeof(irMuteToggle),
-    irMuteToggle},
-    
-   {MUTE_TOGGLE,
-    SZ_MUTE_TOGGLE,
-    &muteState,
-    sizeof(irMuteToggle),
-    irMuteToggle},
-    
-   {FIRST_REGISTRATION,
-    SZ_FIRST_REGISTRATION,
-    &undefined,
-    0,
-    NULL},
-    
-   {REGISTER,
-    SZ_REGISTER,
-    &undefined,
-    0,
-    NULL},
-    
-   {DEREGISTER,
-    SZ_DEREGISTER,
-    &undefined,
-    0,
-    NULL},
-
-   {REREGISTER,
-    SZ_REREGISTER,
-    &undefined,
-    0,
-    NULL},
-    
-   {RESTORE_STATE,
-    SZ_RESTORE_STATE,
-    &undefined,
-    0,
-    NULL},
-    
-   {MASTER_VOLUME,
-    SZ_MASTER_VOLUME,
-    &masterVolume,
-    0,
-    NULL},
-    
-   {MASTER_VOLUME_UP,
-    SZ_MASTER_VOLUME_UP,
-    &masterVolume,
-    sizeof(irMasterVolumeUp),
-    irMasterVolumeUp},
-    
-   {MASTER_VOLUME_DOWN,
-    SZ_MASTER_VOLUME_DOWN,
-    &masterVolume,
-    sizeof(irMasterVolumeDn),
-    irMasterVolumeDn},
-    
-   {CENTER_VOLUME,
-    SZ_CENTER_VOLUME,
-    &centerVolume,
-    0,
-    NULL},
-    
-   {CENTER_VOLUME_UP,
-    SZ_CENTER_VOLUME_UP,
-    &centerVolume,
-    sizeof(irMenuRight),
-    irMenuRight},
-    
-   {CENTER_VOLUME_DOWN,
-    SZ_CENTER_VOLUME_DOWN,
-    &centerVolume,
-    sizeof(irMenuLeft),
-    irMenuLeft},
-    
-   {SURROUND_VOLUME,
-    SZ_SURROUND_VOLUME,
-    &surroundRightVolume,
-    0,
-    NULL},
-    
-   {SURROUND_RIGHT_VOLUME,
-    SZ_SURROUND_RIGHT_VOLUME,
-    &surroundRightVolume,
-    0,
-    NULL},
-    
-   {SURROUND_RIGHT_VOLUME_UP,
-    SZ_SURROUND_RIGHT_VOLUME_UP,
-    &surroundRightVolume,
-    sizeof(irMenuRight),
-    irMenuRight},
-    
-   {SURROUND_RIGHT_VOLUME_DOWN,
-    SZ_SURROUND_RIGHT_VOLUME_DOWN,
-    &surroundRightVolume,
-    sizeof(irMenuLeft),
-    irMenuLeft},
-    
-   {SURROUND_LEFT_VOLUME,
-    SZ_SURROUND_LEFT_VOLUME,
-    &surroundLeftVolume,
-    0,
-    NULL},
-    
-   {SURROUND_LEFT_VOLUME_UP,
-    SZ_SURROUND_LEFT_VOLUME_UP,
-    &surroundLeftVolume,
-    sizeof(irMenuRight),
-    irMenuRight},
-    
-   {SURROUND_LEFT_VOLUME_DOWN,
-    SZ_SURROUND_LEFT_VOLUME_DOWN,
-    &surroundLeftVolume,
-    sizeof(irMenuLeft),
-    irMenuLeft},
-    
-   {SUBWOOFER_VOLUME,
-    SZ_SUBWOOFER_VOLUME,
-    &subwooferVolume,
-    0,
-    NULL},
-    
-   {SUBWOOFER_VOLUME_UP,
-    SZ_SUBWOOFER_VOLUME_UP,
-    &subwooferVolume,
-    sizeof(irMenuRight),
-    irMenuRight},
-    
-   {SUBWOOFER_VOLUME_DOWN,
-    SZ_SUBWOOFER_VOLUME_DOWN,
-    &subwooferVolume,
-    sizeof(irMenuLeft),
-    irMenuLeft},
-    
-   {SURROUND_MIN,
-    SZ_SURROUND_MIN,
-    &surroundProfile,
-    0,
-    NULL},
-    
-   {SURROUND_STD,
-    SZ_SURROUND_STD,
-    &surroundProfile,
-    0,
-    NULL},
-    
-   {SURROUND_MAX,
-    SZ_SURROUND_MAX,
-    &surroundProfile,
-    0,
-    NULL},
-    
-   {MENU_EFFECT_SPEAKER_LEVEL,
-    SZ_MENU_EFFECT_SPEAKER_LEVEL,
-    &undefined,
-    sizeof(irMenuEffectSpeakerLevel),
-    irMenuEffectSpeakerLevel},
-    
-   {MENU_SETTINGS,
-    SZ_MENU_SETTINGS,
-    &undefined,
-    sizeof(irMenuSet),
-    irMenuSet},
-    
-   {MENU_UP,
-    SZ_MENU_UP,
-    &undefined,
-    sizeof(irMenuUp),
-    irMenuUp},
-    
-   {MENU_DOWN,
-    SZ_MENU_DOWN,
-    &undefined,
-    sizeof(irMenuDown),
-    irMenuDown},
-    
-   {MENU_LEFT,
-    SZ_MENU_LEFT,
-    &undefined,
-    sizeof(irMenuLeft),
-    irMenuLeft},
-    
-   {MENU_RIGHT,
-    SZ_MENU_RIGHT,
-    &undefined,
-    sizeof(irMenuRight),
-    irMenuRight},
-    
-   {DSP_EFFECT_ON,
-    SZ_DSP_EFFECT_ON,
-    &undefined,
-    sizeof(irDspEffectToggle),
-    irDspEffectToggle},
-    
-   {DSP_EFFECT_OFF,
-    SZ_DSP_EFFECT_OFF,
-    &undefined,
-    sizeof(irDspEffectToggle),
-    irDspEffectToggle},
-    
-   {DSP_EFFECT_TOGGLE,
-    SZ_DSP_EFFECT_TOGGLE,
-    &undefined,
-    sizeof(irDspEffectToggle),
-    irDspEffectToggle},
-    
-   {DSP_EFFECT_TOGGLE_ENABLE,
-    SZ_DSP_EFFECT_TOGGLE_ENABLE,
-    &undefined,
-    0,
-    NULL},
-    
-   {DSP_EFFECT_TOGGLE_DISABLE,
-    SZ_DSP_EFFECT_TOGGLE_DISABLE,
-    &undefined,
-    0,
-    NULL},
-    
-   {DSP_DOLBY_NORMAL,
-    SZ_DSP_DOLBY_NORMAL,
-    &undefined,
-    sizeof(irDspDolbyNormal),
-    irDspDolbyNormal},
-    
-    // xantech control commands
-   {CHANNEL_A_TO_FRONT_SPEAKERS,
-    SZ_CHANNEL_A_TO_FRONT_SPEAKERS,
-    &channel_a_director,
-    sizeof(irOff0),
-    irOff0},
-    
-   {CHANNEL_A_TO_REAR_SPEAKERS,
-    SZ_CHANNEL_A_TO_REAR_SPEAKERS,
-    &channel_a_director,
-    sizeof(irOn0),
-    irOn0},
-    
-   {REAR_SPEAKERS_FROM_CHANNEL_A,
-    SZ_REAR_SPEAKERS_FROM_CHANNEL_A,
-    &rear_speaker_selector,
-    sizeof(irOff1),
-    irOff1},
-    
-   {REAR_SPEAKERS_FROM_REAR_CHANNEL,
-    SZ_REAR_SPEAKERS_FROM_REAR_CHANNEL,
-    &rear_speaker_selector,
-    sizeof(irOn1),
-    irOn1},
-    
-   {CHANNEL_A_OFF,
-    SZ_CHANNEL_A_OFF,
-    &channel_a_relay,
-    sizeof(irOff2),
-    irOff2},
-    
-   {CHANNEL_A_ON,
-    SZ_CHANNEL_A_ON,
-    &channel_a_relay,
-    sizeof(irOn2),
-    irOn2},
-    
-   {CENTER_SPEAKER_OFF,
-    SZ_CENTER_SPEAKER_OFF,
-    &center_speaker_relay,
-    sizeof(irOff3),
-    irOff3},
-    
-   {CENTER_SPEAKER_ON,
-    SZ_CENTER_SPEAKER_ON,
-    &center_speaker_relay,
-    sizeof(irOn3),
-    irOn3},
-    
-   {CHANNEL_B_OFF,
-    SZ_CHANNEL_B_OFF,
-    &bSpeakerState,
-    sizeof(irOff4),
-    irOff4},
-    
-   {CHANNEL_B_ON,
-    SZ_CHANNEL_B_ON,
-    &bSpeakerState,
-    sizeof(irOn4),
-    irOn4},
-    
-   {SUBWOOFER_OFF,
-    SZ_SUBWOOFER_OFF,
-    &subwoofer_relay,
-    sizeof(irOff5),
-    irOff5},
-    
-   {SUBWOOFER_ON,
-    SZ_SUBWOOFER_ON,
-    &subwoofer_relay,
-    sizeof(irOn5),
-    irOn5},
-    
-   {B_SPEAKERS_ON,
-    SZ_B_SPEAKERS_ON,
-    &bSpeakerState,
-    sizeof(irOn4),
-    irOn4},
-    
-   {B_SPEAKERS_OFF,
-    SZ_B_SPEAKERS_OFF,
-    &bSpeakerState,
-    sizeof(irOff4),
-    irOff4},
-    
-   {REAR_SPEAKERS_ON,
-    SZ_REAR_SPEAKERS_ON,
-    &rearSpeakerState,
-    0,
-    NULL},
-    
-   {REAR_SPEAKERS_OFF,
-    SZ_REAR_SPEAKERS_OFF,
-    &rearSpeakerState,
-    0,
-    NULL},
-    
-   {FRONT_SPEAKERS_ON,
-    SZ_FRONT_SPEAKERS_ON,
-    &frontSpeakerState,
-    0,
-    NULL},
-    
-   {FRONT_SPEAKERS_OFF,
-    SZ_FRONT_SPEAKERS_OFF,
-    &frontSpeakerState,
-    0,
-    NULL},
-    
-   // hdmi switch commands
-   {HDMI_SET_TOP_BOX_SOURCE,
-    SZ_HDMI_SET_TOP_BOX_SOURCE,
-    &hdmiSwitchState,
-    sizeof(hdmiSourceInput1),
-    hdmiSourceInput1},
-   
-   {HDMI_DVD_SOURCE,
-    SZ_HDMI_DVD_SOURCE,
-    &hdmiSwitchState,
-    sizeof(hdmiSourceInput2),
-    hdmiSourceInput2},
-    
-   {HDMI_DVR_SOURCE,
-    SZ_HDMI_DVR_SOURCE,
-    &hdmiSwitchState,
-    sizeof(hdmiSourceInput3),
-    hdmiSourceInput3},
-   
-   // general commands 
-   {EXIT,
-    SZ_EXIT,
-    &undefined,
-    0,
-    NULL}
-};    
+struct serverState serverState, *preserved;
 
 
-void printWinsockError(char * errorMsg) {
-   printf("\n%s: winsock error code %d\n", errorMsg, WSAGetLastError()); 
-}
-
-
-void updateState(const char * szMsg) {
-   setState(szMsg);
-   broadcastMsg(szMsg);
-}
-
-     
 void setState(const char * szMsg) {
 
    struct tiraCmd * tiraCmd = tiraCmdSzToTiraCmd(szMsg);
@@ -608,7 +80,7 @@ void setState(const char * szMsg) {
 
 int getVolumeLevel(const char * msg) {
 
-   char * vol, * level=NULL;
+   const char * vol, * level=NULL;
 
    if ((vol=strstr(msg, SZ_VOLUME)) &&
             strstr(msg, SZ_VOLUME_UP)==NULL &&
@@ -646,7 +118,8 @@ BOOL isTiraCmdStateSet(int cmd) {
 int tiraCmdSzToId(const char * msg) {
 
    int i;
-   char msgBuffer[strlen(msg)+1], * vol;
+   char * msgBuffer = (char *) malloc(strlen(msg)+1); 
+   char * vol;
    strcpy(msgBuffer,msg);
    
    // truncate the absolute volume number
@@ -660,7 +133,8 @@ int tiraCmdSzToId(const char * msg) {
       if ( !(strcmp(msgBuffer, tiraCmd[i].sz)) )
          return tiraCmd[i].id;
    }   
-   
+
+   free(msgBuffer);
    return UNDEFINED;
 }            
 
@@ -712,7 +186,71 @@ struct tiraCmd * tiraCmdIdToTiraCmd(int cmd) {
 }
 
 
-void processClientMsg(struct socketDescriptor * sd, char * msg) {
+int ttyLoop() {
+   char c = '\0';
+   
+   Sleep(500);   // pause to let console messages print out
+   help();
+   tty_buffering(FALSE);
+   
+   while (c!='q') {
+      c=getChar();
+      
+      switch (c) {
+         case '\n':
+            break;
+         case 'q':
+            if (force_exit || exiting) {
+               tty_buffering(TRUE);
+               exit(0);
+            } else {
+               force_exit=TRUE;
+               processClientMsg(SZ_EXIT_PROCESS);
+               c='\0';
+            }   
+            break;
+         default:
+            help();
+      }
+   }
+   return 0;
+}
+
+
+void help() {
+   printf( "\ntype \'q\' to quit\n");
+}
+
+
+void errorExit (const char * szMessage) { 
+   fprintf(stderr, "\n%s\n", szMessage); 
+   ExitProcess(GetLastError()); 
+}
+
+
+HANDLE getStdinHandle() {
+   char szErrMsg[256];
+   HANDLE hStdin;
+
+   if ((hStdin=GetStdHandle(STD_INPUT_HANDLE)) == INVALID_HANDLE_VALUE) {
+      snprintf(szErrMsg, sizeof(szErrMsg), 
+               "getStdinHandle: error %d", GetLastError());
+      errorExit(szErrMsg); 
+   }
+   return hStdin;
+}   
+
+
+#ifdef MCS
+// MCS functions specifically defined for media control system agents
+
+void updateState(const char * szMsg) {
+   setState(szMsg);
+   broadcastMsg(szMsg);
+}
+
+void processClientMsg(const char * msg) { msgQueueAdd(msg); }
+void processClientMsg(const char * msg, struct socketDescriptor * sd) {
    int cmd = tiraCmdSzToId(msg);
    
    switch (cmd) {
@@ -724,16 +262,147 @@ void processClientMsg(struct socketDescriptor * sd, char * msg) {
          sd->registered=FALSE;
          break;
    }
-   
-   processClientCmd(msg);
+
+   // queue client messages to synchronize multithreaded processing
+   // must expose socketDescriptor for multithreaded message context
+   msgQueueAdd(msg, sd);
 }
 
 void processClientDisconnect(struct socketDescriptor * sd) { 
-   if (sd->registered && *sd->socket) {
+   if (sd->registered && sd->connected) {
        // registered and connection still alive
-       processClientDisconnect(); 
+       deregisterClient(sd); 
    }    
    sd->registered = FALSE;   
+}
+
+
+// function to start the thread for processing TCP/IP messages
+BOOL isClientMsgThreadRunning=FALSE;
+void processClientMsgThreadStart() {
+   HANDLE hThread;
+   if (hThread=CreateThread(
+         NULL,    // default security
+         0,       // default stack size
+         (LPTHREAD_START_ROUTINE) processClientMsgThread,
+         NULL,    // thread parameter
+         0,       // run thread immediately
+         NULL)    // ignore thread id
+      ) {
+      CloseHandle(hThread);
+      isClientMsgThreadRunning=TRUE;
+   } else {
+      printf("processClientMsgThreadStart failed\n");
+   }   
+}
+
+#else 
+void processClientMsg(const char * msg) {}
+void processClientDisconnect() {}
+const char * tira_dll_absolute_path = 
+   "\\\\georgia\\backup\\install\\drivers\\interface\\usb\\tira\\sdk\\Tira2.dll";
+#endif   // #ifdef MCS
+
+
+int tiraTransmit(struct tiraCmd * cmd) {
+   int result;
+   static const unsigned char * irCodes = NULL;
+   
+   if (!irCodes)
+      irCodes = (const unsigned char *) GlobalAlloc(GPTR, 1024);
+      
+   memcpy((void *)irCodes, cmd->codes, cmd->size);
+   result = tira_transmit(0, -1, irCodes, cmd->size);
+   
+   if (result)
+      printf("tiraTransmit: tira_transmit of the %s cmd failed. errno %d\n", cmd->sz, result);
+   
+   return result;
+}      
+
+
+// initialize the HOMElectronics Tira2 IR receiver/transmitter
+int initTiraRemoteControl(int port) {
+   int error;
+   
+   loadTiraDll();
+   printf("Tira library loaded\n");
+   
+   if (tira_init()) {
+      printf("initTiraRemoteControlPort: tira_init failed\n");
+      exit(1);
+   }
+
+   printf("Tira activat%s on com port %d\n", 
+         (error=tira_start(port-1)) ? 
+         "ion failed" : "ed", port);
+         
+   return error;
+}   
+
+
+void loadTiraDll() {
+
+   const char * dll;
+   
+   const DWORD SZLEN = 256;
+   TCHAR tira_dll_cwd[SZLEN];
+   GetCurrentDirectory(SZLEN, tira_dll_cwd);
+   strcat(tira_dll_cwd,"\\");
+   strcat(tira_dll_cwd, TIRA_DLL);
+   
+   // Search for the tira2 dll to run as a service or in console mode in case
+   // the dll is not in the current directory.  Unfortunately, running rcclient
+   // as a service bars SendInput from interacting with the desktop which makes
+   // synthesized keystrokes impossible
+   if (!access(tira_dll_cwd, F_OK))
+      dll = tira_dll_cwd;
+   else if (!access(tira_dll_absolute_path, F_OK))
+      dll = tira_dll_absolute_path;
+   else 
+      dll = TIRA_DLL;
+   
+   if ( !(tiraDLL=LoadLibrary(dll)) )
+      printLoadTiraDllErrorAndExit("LoadLibrary(Tira2.dll)");
+      
+   if ( !(tira_init = (tira_init_t) GetProcAddress(tiraDLL , "tira_init")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_init)");
+       
+   if ( !(tira_cleanup = (tira_cleanup_t) GetProcAddress(tiraDLL , "tira_cleanup")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_cleanup)");
+       
+   if ( !(tira_set_handler = (tira_set_handler_t) GetProcAddress(tiraDLL , "tira_set_handler")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_handler)");
+       
+   if ( !(tira_start = (tira_start_t) GetProcAddress(tiraDLL , "tira_start")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_start)");
+       
+   if ( !(tira_stop = (tira_stop_t) GetProcAddress(tiraDLL , "tira_stop")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_stop)");
+       
+   if ( !(tira_start_capture = (tira_start_capture_t) GetProcAddress(tiraDLL , "tira_start_capture")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_start_capture)");
+       
+   if ( !(tira_cancel_capture = (tira_cancel_capture_t) GetProcAddress(tiraDLL , "tira_cancel_capture")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_cancel_capture)");
+       
+   if ( !(tira_get_captured_data = (tira_get_captured_data_t) GetProcAddress(tiraDLL , "tira_get_captured_data")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_get_captured_data)");
+       
+   if ( !(tira_transmit = (tira_transmit_t) GetProcAddress(tiraDLL , "tira_transmit")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_transmit)");
+       
+   if ( !(tira_delete = (tira_delete_t) GetProcAddress(tiraDLL , "tira_delete")) )
+       printLoadTiraDllErrorAndExit("GetProcAddress(tira_delete)");
+}
+
+
+void unloadTiraDll() {
+   if (tiraDLL) {
+      tira_cleanup();
+      FreeLibrary(tiraDLL);
+      tiraDLL = NULL;
+   }   
 }
 
 
@@ -744,12 +413,13 @@ void createProcess(const char * exeFile, const char * arg) {
    si.cb = sizeof(si);
    memset(&pi,0,sizeof(pi));
    
-   char moduleDir[strlen(exeFile)+1], *slash;
+   char * moduleDir = (char *) malloc(strlen(exeFile)+1);
+   char * slash;
    strcpy(moduleDir,exeFile);
    if(slash=strrchr(moduleDir,'\\'))
       *slash=0;
       
-   char cmdLine[strlen(exeFile)+strlen(arg)+2];
+   char * cmdLine = (char *) malloc(strlen(exeFile)+strlen(arg)+2);
    strcpy(cmdLine,exeFile);
    strcat(cmdLine," ");
    strcat(cmdLine,arg);
@@ -768,6 +438,8 @@ void createProcess(const char * exeFile, const char * arg) {
    {
       printf( "CreateProcess failed (%d).\n", GetLastError() );
    }
+   free(moduleDir);
+   free(cmdLine);
 } 
 
 
@@ -778,15 +450,32 @@ char * szToLower(char * sz) {
 }
 
 
-// atomic compare and swap 
+// local atomic compare and swap 
 // if lock == FALSE, lock = TRUE; return FALSE
 // if lock == TRUE, lock = TRUE; return TRUE
 LONG isLocked(volatile LONG * lock) {
    return InterlockedCompareExchange(lock, TRUE, FALSE);
 }
 
+// local atomic unlock
 void unlock(volatile LONG * lock) { *lock=FALSE; }
 
+
+// global atomic compare and swap
+// if lock == NULL, lock = szFunc; return FALSE
+// if lock != NULL, return TRUE
+int isLocked(const char * szFunc) {
+   if (InterlockedCompareExchange((volatile LONG *) &lock, lock!=NULL, FALSE))
+      return TRUE;
+   else {
+      lock=szFunc;
+      //printf("%s has lock\n", szFunc);
+      return FALSE;
+   }
+}
+
+// global atomic unlock
+void unlock() { lock=NULL; }
 
 // findWindow is a WinAPI FindWindow replacement that finds the first
 // window with a case insenstive version of the given string and then 
@@ -794,7 +483,7 @@ void unlock(volatile LONG * lock) { *lock=FALSE; }
 HWND findWindow(const char * sz) {
    int i, titleLen = 0;
    char windowTxt[256];
-   char title[strlen(sz) + 1];
+   char * title = (char *) malloc(strlen(sz) + 1);
    szToLower(strcpy(title, sz));
    HWND hWnd = GetTopWindow(NULL);
    while(hWnd) {
@@ -807,51 +496,7 @@ HWND findWindow(const char * sz) {
 }
 
 
-int ttyLoop() {
-   char c;
-   
-   help();
-   stty_unbuffered();
-   ttyExit=TRUE;
-   
-   while (1) {
-      printf(">");
-      c=getchar();
-      
-      switch (c) {
-         case '\n':
-            break;
-         case 'q':
-         case 'Q':
-            if (ttyExit) {
-               printf("\n");
-               ttyExit=FALSE;
-               processClientCmd(SZ_EXIT);
-            } 
-            return 0;
-         default:
-            help();
-      }
-   }
-   return 0; 
-}
-
-void stty_unbuffered() {
-#ifdef CONSOLE_MODE
-   // get a copy of the stdin settings and disable the buffering flag
-   tcgetattr(STDIN_FILENO, &old_tio);
-   new_tio=old_tio;
-   new_tio.c_lflag &=(~ICANON);
-   tcsetattr(STDIN_FILENO, TCSANOW, &new_tio);
-#endif   
-}
-
-void stty_buffered() {
-#ifdef CONSOLE_MODE
-   // restore to flushing buffer after a CR
-   tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
-#endif   
-}
+//// begin general purpose functions
 
 BOOL isConsoleMode() {
 #ifdef CONSOLE_MODE
@@ -860,6 +505,302 @@ BOOL isConsoleMode() {
    return FALSE;
 #endif
 }   
+
+
+#ifdef __CYGWIN__
+// CYGWIN is more posix compliant so it works better with other posix compliant
+// shells like bash.  The downside is termio stuff wont compile with MSVC or MingW.
+// Added here for debugging flexibility
+
+#include <unistd.h>
+#include <termios.h>
+
+void tty_buffering(int enable) {
+
+   struct termios tio;
+   
+   tcgetattr(STDIN_FILENO, &tio);
+   enable ? tio.c_lflag |= (ICANON | ECHO) : tio.c_lflag &= (~ICANON & ~ECHO);
+   tcsetattr(STDIN_FILENO, TCSANOW, &tio);
+}   
+
+// arrow keys come as an escaped sequence:
+// 0x1b
+// 0x5b
+// CHAR_ARROW_<direction>
+#define GETCHAR_ESCAPE_SEQ1  0x1b
+#define GETCHAR_ESCAPE_SEQ2  0x5b
+#define GETCHAR_UP           0x41
+#define GETCHAR_DOWN         0x42
+#define GETCHAR_RIGHT        0x43
+#define GETCHAR_LEFT         0x44
+
+char getChar(void) {
+
+   char c;
+   int seq=0;           
+   
+   while (TRUE) { 
+   
+      c=getchar();
+      
+      switch (c) {
+         case GETCHAR_ESCAPE_SEQ2:
+            if (!seq)
+               return c;
+         case GETCHAR_ESCAPE_SEQ1:
+            seq++;
+            break;
+         default:
+            if (seq==2) {
+               switch (c) {
+                  case GETCHAR_UP:
+                     return CHAR_ARROW_UP;
+                     break;
+                  case GETCHAR_DOWN:
+                     return CHAR_ARROW_DOWN;
+                     break;
+                  case GETCHAR_RIGHT:
+                     return CHAR_ARROW_LEFT;
+                  break;
+                  case GETCHAR_LEFT:
+                     return CHAR_ARROW_RIGHT;
+                     break;
+                  default:
+                     continue;
+               }
+            }   
+            else if (isprint(c)) {
+               return tolower(c);
+            }   
+      }
+   }
+}               
+
+char * keyToName(char keyChar, char * szName, int size) {
+
+   switch (keyChar) {
+      case '\r': 
+         strncpy(szName, "cr", size);
+         break;
+      case CHAR_ARROW_UP:
+         strncpy(szName, "up", size);
+         break;   
+      case CHAR_ARROW_DOWN:
+         strncpy(szName, "dn", size);
+         break;   
+      case CHAR_ARROW_RIGHT:
+         strncpy(szName, "rt", size);
+         break;   
+      case CHAR_ARROW_LEFT:
+         strncpy(szName, "lt", size);
+         break;
+      default:      
+         snprintf(szName, size, "%c", keyChar);
+   }
+         
+   return szName;
+   
+}
+
+#else
+ 
+// disabling and enabling winapi line mode buffering via GetConsoleMode
+// and SetConsoleMode in place of the tcgetattr and tcsetattr functions 
+// is not needed when using ReadConsoleInput in place of getchar
+void tty_buffering(int enable) {}
+
+char getChar(void) {
+   HANDLE hStdin = getStdinHandle(); 
+   DWORD irCount;
+   INPUT_RECORD irBuf[1];
+   char szErrMsg[256];
+
+   while (TRUE) { 
+      if (!ReadConsoleInput(hStdin, irBuf, 
+                            sizeof(irBuf)/sizeof(INPUT_RECORD), &irCount) ) {
+         snprintf(szErrMsg, sizeof(szErrMsg), "ReadConsoleInput: error %d", GetLastError());
+         errorExit(szErrMsg); 
+      }
+
+      KEY_EVENT_RECORD ker = irBuf[0].Event.KeyEvent;
+      if (ker.bKeyDown) {
+         // return keyboard down events and
+         // no modifier key events (ctrl, shift, alt, etc)
+         if (ker.uChar.AsciiChar == CHAR_ARROW_UP ||
+             ker.uChar.AsciiChar == CHAR_ARROW_DOWN || 
+             ker.uChar.AsciiChar == CHAR_ARROW_RIGHT || 
+             ker.uChar.AsciiChar == CHAR_ARROW_LEFT) {
+            // skip remapped keyboard events
+            // ctrl-X, ctrl-Y, ctrl-Z, ctrl-[
+            continue;
+         }
+         else if (ker.wVirtualKeyCode == VK_UP)
+            return CHAR_ARROW_UP;
+         else if (ker.wVirtualKeyCode == VK_DOWN)
+            return CHAR_ARROW_DOWN;
+         else if (ker.wVirtualKeyCode == VK_RIGHT)
+            return CHAR_ARROW_RIGHT;
+         else if (ker.wVirtualKeyCode == VK_LEFT)
+            return CHAR_ARROW_LEFT;
+         else if (ker.uChar.AsciiChar)
+            return tolower(ker.uChar.AsciiChar);
+      }   
+   }      
+}
+
+char * keyToName(char keyChar, char * szName, int size) {
+   
+   switch (keyChar) {
+      case '\r': 
+         strncpy(szName, "cr", size);
+         break;
+      default:      
+         snprintf(szName, size, "%c", keyChar);
+   }      
+   
+   return szName;
+}
+
+#endif // CYGWIN
+
+static LinkedList * printQueue;        // prevents jumbled console logs 
+static volatile LONG printQueueLock;   // insure exclusive thread access
+void printQueueAdd(char * sz) { 
+   while (isLocked(&printQueueLock))   
+      Sleep(10);
+   szQueueAdd(&printQueue, sz); 
+   unlock(&printQueueLock);
+}
+char * printQueueRemove() { 
+   while (isLocked(&printQueueLock))   
+      Sleep(10);
+   char * sz = szQueueRemove(&printQueue); 
+   unlock(&printQueueLock);
+   return sz;
+} 
+
+
+static LinkedList * msgQueue;        // serialize message processing
+static volatile LONG msgQueueLock;   // insure exclusive thread access
+
+BOOL isMsgQueueEmpty() { 
+   while (isLocked(&msgQueueLock))   
+      Sleep(10);
+   BOOL isEmpty = isQueueEmpty(msgQueue); 
+   unlock(&msgQueueLock);
+   return isEmpty;
+}
+
+void msgQueueAdd(const char * szMsg) { 
+   QueuedMsg * msg = new QueuedMsg(szMsg);
+   while (isLocked(&msgQueueLock))   
+      Sleep(10);
+   queueAdd(&msgQueue, msg); 
+   unlock(&msgQueueLock);
+}
+
+void msgQueueAdd(const char * szMsg, IrCmd * irCmd) { 
+   QueuedMsg * msg = new QueuedMsg(szMsg, irCmd);
+   while (isLocked(&msgQueueLock))   
+      Sleep(10);
+   queueAdd(&msgQueue, msg); 
+   unlock(&msgQueueLock);
+}
+
+void msgQueueAdd(const char * szMsg, struct socketDescriptor * sd) { 
+   QueuedMsg * msg = new QueuedMsg(szMsg, sd);
+   while (isLocked(&msgQueueLock))   
+      Sleep(10);
+   queueAdd(&msgQueue, msg); 
+   unlock(&msgQueueLock);
+}
+
+QueuedMsg * msgQueueRemove() { 
+   while (isLocked(&msgQueueLock))   
+      Sleep(10);
+   QueuedMsg * queuedMsg = (QueuedMsg *) queueRemove(&msgQueue);
+   unlock(&msgQueueLock);
+   return queuedMsg;
+}   
+
+
+// generic routine to add a string to a queue
+void szQueueAdd(LinkedList ** queuePtr, const char * sz) {
+   char * qEntry = (char *) malloc(strlen(sz)+1);
+   strcpy(qEntry, sz);
+   queueAdd(queuePtr, (void *) qEntry); 
+}
+
+// generic routine to remove a string from a queue
+// returns NULL if queue is empty
+char * szQueueRemove(LinkedList ** queuePtr) { 
+   return (char *) queueRemove(queuePtr); 
+}
+
+
+// add an entry onto the end of the given LinkedList
+void queueAdd(LinkedList ** queuePtr, void * ptr) {
+   BOOL isEmpty=TRUE;
+   
+   if (!*queuePtr)
+      *queuePtr = new LinkedList();
+      
+   LinkedList * q = *queuePtr;   
+   
+   for (q=q->first(); q->isNotLast(); q=q->next()) {
+      if (!isEmpty && q->get() == NULL) {
+         // reuse an existing entry
+         q->add(ptr);
+         return;
+      }   
+      if (q->get() != NULL)
+         isEmpty=FALSE;
+   }
+   
+   if (isEmpty) {
+      // queue is empty, add as first 
+      q->first()->add(ptr);
+   }   
+   else {
+      // queue is full, add onto the end   
+      q->add(ptr);
+   }
+   
+   return;
+}         
+
+// remove and return an entry from the beginning of the given LinkedList
+// return NULL if the queue is empty
+void * queueRemove(LinkedList ** queuePtr) { 
+   void * retval=NULL;
+   
+   if (!*queuePtr)
+      *queuePtr = new LinkedList();
+      
+   LinkedList * q = *queuePtr;   
+
+   for (q=q->first(); q->isNotLast(); q=q->next()) {
+      if (q->get() != NULL) {
+         retval = q->get();
+         q->set(NULL);
+         break;
+      }   
+   }
+   return retval;
+}
+
+BOOL isQueueEmpty(LinkedList * q) {
+   if (q==NULL)
+      return TRUE;
+
+   for (q=q->first(); q->isNotLast(); q=q->next()) {
+      if (q->get() != NULL)
+         return FALSE;
+   }
+   
+   return TRUE;
+}
 
 
 HANDLE initExitHandler() {
@@ -905,7 +846,7 @@ LRESULT WINAPI exitHandler(HWND hwnd,
        case WM_ENDSESSION:
        case WM_CLOSE:
        case WM_QUERYENDSESSION:
-          processClientCmd(SZ_EXIT);
+          processClientMsg(SZ_EXIT_PROCESS);
           PostQuitMessage(0);
           break;
        default:   
@@ -927,115 +868,46 @@ void initConsoleModeExitHandler() {
 
 // handle a system shutdown or reboot event
 BOOL consoleModeExitHandler(DWORD event) { 
-  switch(event) { 
-    case CTRL_C_EVENT: 
-       printf("received a ctrl-c signal\n");
-    case CTRL_CLOSE_EVENT: 
-    case CTRL_SHUTDOWN_EVENT: 
-       processClientCmd(SZ_EXIT);
-       return TRUE;
+   switch(event) { 
+     case CTRL_C_EVENT: 
+        printf("received a ctrl-c signal\n");
+     case CTRL_CLOSE_EVENT: 
+     case CTRL_SHUTDOWN_EVENT: 
+        if (force_exit || exiting) {
+           tty_buffering(TRUE);
+           exit(0);
+        } else {
+           force_exit=TRUE;
+           processClientMsg(SZ_EXIT_PROCESS);
+        }   
+        return TRUE;
  
-    // Pass other signals to the next handler. 
-    case CTRL_BREAK_EVENT: 
-    case CTRL_LOGOFF_EVENT: 
-       return FALSE; 
+     // Pass other signals to the next handler. 
+     case CTRL_BREAK_EVENT: 
+     case CTRL_LOGOFF_EVENT: 
+        return FALSE; 
  
-    default: 
-       return FALSE; 
-  } 
-} 
-
-
-int tiraTransmit(struct tiraCmd * cmd) {
-   int result;
-   static const unsigned char * irCodes = NULL;
-   
-   if (!irCodes)
-      irCodes = (const unsigned char *) GlobalAlloc(GPTR, 1024);
-      
-   memcpy((void *)irCodes, cmd->codes, cmd->size);
-   result = tira_transmit(0, -1, irCodes, cmd->size);
-   
-   if (result)
-      printf("tiraTransmit: tira_transmit of the %s cmd failed. errno %d\n", cmd->sz, result);
-   
-   return result;
-}      
-
-
-void loadTiraDll() {
-
-   HMODULE handle;
-   const char * dll;
-   
-   const DWORD SZLEN = 256;
-   TCHAR tira_dll_cwd[SZLEN];
-   GetCurrentDirectory(SZLEN, tira_dll_cwd);
-   strcat(tira_dll_cwd,"\\");
-   strcat(tira_dll_cwd, TIRA_DLL);
-   
-   // Search for the tira2 dll to run as a service or in console mode in case
-   // the dll is not in the current directory.  Unfortunately, running rcclient
-   // as a service bars SendInput from interacting with the desktop which makes
-   // synthesized keystrokes impossible
-   if (!access(tira_dll_cwd, F_OK))
-      dll = tira_dll_cwd;
-   else if (!access(tira_dll_absolute_path, F_OK))
-      dll = tira_dll_absolute_path;
-   else 
-      dll = TIRA_DLL;
-   
-   if ( !(handle=LoadLibrary(dll)) )
-      printErrorAndExit("LoadLibrary(Tira2.dll)");
-      
-   if ( !(tira_init = (tira_init_t) GetProcAddress(handle, "tira_init")) )
-       printErrorAndExit("GetProcAddress(tira_init)");
-       
-   if ( !(tira_cleanup = (tira_cleanup_t) GetProcAddress(handle, "tira_cleanup")) )
-       printErrorAndExit("GetProcAddress(tira_cleanup)");
-       
-   if ( !(tira_set_handler = (tira_set_handler_t) GetProcAddress(handle, "tira_set_handler")) )
-       printErrorAndExit("GetProcAddress(tira_handler)");
-       
-   if ( !(tira_start = (tira_start_t) GetProcAddress(handle, "tira_start")) )
-       printErrorAndExit("GetProcAddress(tira_start)");
-       
-   if ( !(tira_stop = (tira_stop_t) GetProcAddress(handle, "tira_stop")) )
-       printErrorAndExit("GetProcAddress(tira_stop)");
-       
-   if ( !(tira_start_capture = (tira_start_capture_t) GetProcAddress(handle, "tira_start_capture")) )
-       printErrorAndExit("GetProcAddress(tira_start_capture)");
-       
-   if ( !(tira_cancel_capture = (tira_cancel_capture_t) GetProcAddress(handle, "tira_cancel_capture")) )
-       printErrorAndExit("GetProcAddress(tira_cancel_capture)");
-       
-   if ( !(tira_get_captured_data = (tira_get_captured_data_t) GetProcAddress(handle, "tira_get_captured_data")) )
-       printErrorAndExit("GetProcAddress(tira_get_captured_data)");
-       
-   if ( !(tira_transmit = (tira_transmit_t) GetProcAddress(handle, "tira_transmit")) )
-       printErrorAndExit("GetProcAddress(tira_transmit)");
-       
-   if ( !(tira_delete = (tira_delete_t) GetProcAddress(handle, "tira_delete")) )
-       printErrorAndExit("GetProcAddress(tira_delete)");
+     default: 
+        return FALSE; 
+   } 
 }
 
 
-void unloadTiraDll() {
-   tira_cleanup();
-   FreeLibrary(handle);
-}
+void printLoadTiraDllErrorAndExit(const char * msg) {
+   printf("Error: loadTiraDll %s failed\n", msg);
+   ExitProcess(1);
+}    
 
 
-int processArgs(int argc, char ** argv) {
+int debug=FALSE;
+void processArgs(int argc, char ** argv) {
    int i, startupDelay, comPort=0;
 
    for (i=0;i<argc;i++) {
    
       if (!strcmp(argv[i],"-d"))
          debug=TRUE;
-      else if(!strcmp(argv[i],"-port") || !strcmp(argv[i],"-delay"));
-      else if (i && !strcmp(argv[i-1],"-port"))
-         comPort = atoi(argv[i]);
+      else if(!strcmp(argv[i],"-delay"));
       else if (i && !strcmp(argv[i-1],"-delay")) {
          // delay startup during boot to allow dependencies to initialize
          if ( (startupDelay=atoi(argv[i])) && 
@@ -1047,23 +919,20 @@ int processArgs(int argc, char ** argv) {
          }   
       } 
       else if (i) {
-         usage();
+         usage(argv[0]);
          exit(0);
       }   
    }
-   return comPort;
 }   
 
-void usage() { 
-   printf("\nUsage: %s [-d] [-delay <seconds>] [-port <port>]\n", moduleName);
+
+void usage(char * exe) {
+   // extract the exe file basename from cygwin or mingw run time libraries
+   char * exeFilename = strrchr(exe, '/') ? strrchr(exe, '/') + 1 : exe;
+   exeFilename = strrchr(exeFilename, '\\') ? strrchr(exeFilename, '\\') + 1 : exeFilename;
+   char * exeExt = strrchr(exeFilename, '.') ? strrchr(exeFilename, '.') : exe + strlen(exe);
+   *exeExt = '\0';
+   printf("\nUsage: %s [-d] [-delay <seconds>]\n", exeFilename);
 }
 
-
-#ifdef NO_MCS
-const char * moduleName = "???";
-void processClientCmd(const char * szCmd) {}
-void processClientDisconnect() {}
-const char * tira_dll_absolute_path = 
-   "\\\\georgia\\backup\\install\\drivers\\interface\\usb\\tira\\sdk\\Tira2.dll";
-#endif
 

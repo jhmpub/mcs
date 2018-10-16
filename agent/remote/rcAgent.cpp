@@ -14,7 +14,7 @@
 // Mute          -> Amplifier Mute
 
 // TV Mode
-// TV Power      -> Toggle Amplifier On; Init Matrix; Init Volume; Set TV Input/Amplfier Off
+// TV Power      -> Toggle Amplifier On; Init Matrix/Set Audio Source; Init Volume; TV On
 // TV/Video      -> Toggle TV/DVD/LVR_MM Input
 // Menu Right    -> Surround Sound On
 // Menu Left     -> Surround Sound Off
@@ -47,87 +47,201 @@
 // process during startup.  The rcAgentConsole target is used for debugging.
 //
 // 2008 Sep 10 jhm original creation
-// 2009 Apr 10 jhm added IR cmd translations for videolan 
-//                 media player
+// 2009 Apr 10 jhm added IR cmd translations for videolan media player
 // 2013 Apr 28 jhm added IR cmd translations for windows media center
 // 2015 Dec 24 jhm added a thread to listen for audio control notifications
 // 2016 Jul 17 jhm added smart remote functionality
+// 2018 Sep 04 jhm added zigbee remote control functionality
+//                 replaced spinlocks with message queues for thread
+//                 coordination and command serialization
+
 
 // SendInput() is only declared for Windows XP and later
 #define _WIN32_WINNT 0x0501
 
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <psapi.h>
 #include <stdio.h>
-#include "../../common/tira.h"
-#include "../../common/xantech_codes.h"
-#include "../../common/yamaha_codes.h"
-#include "../../common/common.h"
-#include "../../common/extern.h"
-#include "../../common/socket.h"
+#include "common.h"
+#include "socket.h"
+#include "tira_dll.h"
 #include "rcAgent.h"
-
-extern LinkedList * notifyList;
+#include "zrc.h"
 
 int main(int argc, char ** argv) {
 
-   int error, comPort;
-   comPort = processArgs(argc, argv);
-   
-   loadTiraDll();
-   printf("Tira library loaded\n");
-   tira_init();
-   initTcpServer(initWinsock(), MEDIA_CONTROL_PORT+1);
-
-   if (!debug) {
-      int port = comPort ? comPort : DEFAULT_COM_PORT;
-      printf("Tira activat%s on com port %d\n", 
-            (error=tira_start(port-1)) ? "ion failed" : "ed", port);
-      if (error) { usage(); exit(1); }
-   
-      printf("Callback capture activat%s\n", 
-             (error=tira_set_handler(irRxCmdCallback)) ? "ion failed" : "ed");
-      if (error) exit(1);
-   }   
+   processArgs(argc, argv);
    
    HANDLE hThread = initExitHandler();
+   itachCmd = new ItachCmd(); 
    initConsoleModeExitHandler();
    
-   arAgentSd.host = 
-      (char *) (debug ? AUDIO_RECEIVER_DEBUG_HOSTNAME : AUDIO_RECEIVER_AGENT_HOSTNAME);
+   initTiraRemoteControl();
+   initZigbeeRemoteControl();
+   processClientMsgThreadStart();
+   initWinsock();
    initClientThread(&arAgentSd);
    initClientThread(&itachSd);
+   initTcpServer(getHostname(), REMOTE_CONTROL_PORT);
    
    isConsoleMode() ?
       ttyLoop() :
       WaitForSingleObject(hThread,INFINITE);
-      
 }
 
 
-// generic routinte to create a thread that maintains a connection 
-// for receiving agent status notifications
-void initClientThread(struct socketDescriptor * sd) {
-
-   establishConnection(sd);
-
-   if (CreateThread(NULL,  // default security
-                    0,     // default stack size
-                    (LPTHREAD_START_ROUTINE)&rxClientThread,
-                    sd,    // thread parameter
-                    0,     // run thread immediately
-                    NULL)  // ignore thread id
-        == NULL) {
-      char description[strlen("init") + strlen(sd->description)+1];
-      printErrorAndExit((const char *)strcat(strcpy(description,"init"),sd->description));
-   }
+// initialize the HOMElectronics Tira2 IR receiver/transmitter and callback
+int initTiraRemoteControl() {
+   int error;
+   
+   initTiraRemoteControl(DEFAULT_TIRA_COM_PORT);
+  
+   printf("Tira set callback handler %s\n", 
+          (error=tira_set_handler(irRxCmdCallback)) ? "failed" : "succeeded");
+          
+   if (error) exit(1);
+   
+   return 0;
 } 
 
+// initialize the Texas Instruments CC2531EMK zigbee remote control usb dongle
+void initZigbeeRemoteControl() { 
+   initZigbeeRemoteControl(DEFAULT_ZRC_COM_PORT); 
+}
+
+
+// tira callback for ir remote clients (e.g. itach, universal remote, etc.)
+int __stdcall irRxCmdCallback(char const * irCode) {
+
+   DWORD discardDuplicatePeriod, rxDelta;
+   int duplicate=FALSE, noise=FALSE;
+   char irRxDebug[256], szQueuedDelta[32];
+   const char * result;
+   static int queuedCmdId;
+   
+   szQueuedDelta[0] = '\0';
+   struct rcCmd * cmd = irRxCmdToRcCmd(irCode);
+   irRxTime=GetTickCount();
+   
+   if (cmd->id == UNDEFINED) {
+      result = "match not found";
+   }
+   else {
+      discardDuplicatePeriod = cmd->id==VIDEO_POWER ? 5000 : IR_RX_QUIET_PERIOD;
+      duplicate = irRxTime - cmd->irRx->timestamp < discardDuplicatePeriod;  
+      result = duplicate ? "discarding duplicate" : "match found";
+      
+      if (irRxTime - queuedIrRxTime < IR_RX_NOISE_PERIOD &&
+          queuedCmdId != cmd->id &&
+          !(duplicate || cmd->id == UNDEFINED || cmd->id == IR_IGNORE || debug)) {
+         // discard this command as noise because it was received faster than
+         // a user can press two different keys
+         // duplicate/undefined/ignored/debug cases are handled independently
+         // unique commands in rapid succession are likey due to plasma tv ir noise
+         noise = TRUE;
+         result = "discarding noise";
+         snprintf(szQueuedDelta, sizeof(szQueuedDelta), "(%d)", 
+                  irRxTime - queuedIrRxTime);
+      } 
+      
+      // timestamp receipt to discard subsequent IR commands repeated from
+      // a user holding down a remote key or an itach command coded to repeat   
+      cmd->irRx->timestamp=irRxTime;
+   }
+   
+   snprintf(irRxDebug,  
+      sizeof(irRxDebug),
+      "irRx %s %s%s: %s -> %s\n",
+      result,
+      szTime(),
+      szQueuedDelta,
+      irCode, 
+      cmd->irRx->sz);
+      
+   if (irRxHasCode(itachCmd->irRxPending, irCode)) {
+      // irCode from the itach exists in the array of expected irRx codes 
+      // set irRxPending=NULL to notify the processClientMsgThread's
+      // processItachCmd waiting in a spin loop the expected command was received
+      strncpy(itachCmd->debug, irRxDebug, sizeof(itachCmd->debug)); 
+      itachCmd->irRxPending = NULL;
+      return 0;
+   }   
+   
+   if (duplicate || noise || cmd->id == UNDEFINED || debug) {
+      // log but do not process duplicate/noise/undefined commands
+      // do not process any commands when started with the -d debug option for
+      // defining and validating IR callback codes in tira_rx.h
+      debug ? printf("%s", irRxDebug) : printq("%s", irRxDebug);
+   }   
+   else if (cmd->id != IR_IGNORE) {   
+      // ignore ir commands not meant for this agent.  e.g. because
+      // no vcr exists then all vcr commands are really meant for this agent 
+      // tv and dvd commands are meant for existing equipment
+      // add this tira cmd to the message queue for sequential processing
+      queuedIrRxTime = irRxTime;
+      queuedCmdId = cmd->id;
+      msgQueueAdd(cmd->sz, new IrCmd(irRxDebug, cmd->id, irRxTime));
+   }
+   
+   return 0;
+}
+
+
+//// begin agent specific socket hooks
+void deregisterClient(struct socketDescriptor * sd) {}
+void processServerConnect(const char * agent) {
+   if (!strcmp(agent, arAgentSd.host) && tvPowered)
+      sendArCmd(SZ_REREGISTER);
+}
+
+// handle arAgent and itach server messages
+void processServerMsg(const char * msg, struct socketDescriptor * sd) {
+   if (!strcmp(sd->host, arAgentSd.host))
+      msgQueueAdd(msg, sd);
+   else {
+      printq("processServerMsg from %s: %s\n", sd->host, msg);
+      if (strstr(msg, "completeir"))
+         itachCmd->irComplete=TRUE;
+   }      
+}
+//// end agent specific socket hooks
+
+
+// send a TCP/IP command to the audio receiver agent
+void sendArCmd(const char * szCmd) {
+   if (arAgentSd.socket!=INVALID_SOCKET) 
+      sendMsg(&arAgentSd, szCmd);
+}
+
+
+// TCP/IP and IR message processing thread   
+DWORD processClientMsgThread(LPVOID param) {
+   QueuedMsg * msg;
+   
+   while(!exiting) {
+      while( !(msg=msgQueueRemove()) ) {
+         printConsoleLogMsgs();   
+         Sleep(100);
+      }
+     
+      printConsoleLogMsgs();   
+      if (msg->sd==&arAgentSd)
+         processArAgentNotification(msg->sz);
+      else   
+         processClientCmd(msg); 
+      delete msg;
+   }
+   
+   isClientMsgThreadRunning=FALSE;
+   printf("processClientMsgThread exiting\n");
+   ExitThread(0);
+}   
+   
 
 // update state information received from the audio receiver agent
-// This function confirms completion of a command request and performs
-// initialization sequences based on the audio/video system state
+// audio state information is used to initialize this agent at startup
+// and after sending a registration request to the audio receiver agent
 void processArAgentNotification(char * msg) {
 
    printf("processArAgentNotification: %s\n", msg);
@@ -143,20 +257,45 @@ void processArAgentNotification(char * msg) {
       case LVR_MM:
       case DEN_MM:
          if (displayMode==UNDEFINED && tvPowered) { 
-            nextMode=displayMode=getVideoMode(cmdId);
-            // initialize the current displayMode according to a registered 
-            // client's audio state by setting the TV input 
-            //  tv: video+4 (hdmi switch input)
-            // dvd: video+2 (dvd component input)
-            // dvr: video+4 (hdmi switch input)
-            sendItachCmd(MODE_MENU, TV_MODE, INDEPENDENT, 1500);
-            sendItachCmd(displayMode, TV_MODE, DEPENDENT, 4000);   
-            
-            // and the hdmi switch source
-            setVideoSource(displayMode);
+            const char * szVideoMode = cmdIdToRcCmd(getVideoMode(cmdId))->sz;
+            char * szCmd = (char *) malloc(strlen(SZ_AR_MODE) + strlen(szVideoMode) + 2);
+            sprintf(szCmd, "%s %s", SZ_AR_MODE, szVideoMode);
+            msgQueueAdd(szCmd);
+            free(szCmd);
          }   
          break;      
       case FIRST_REGISTRATION:
+         // audio receiver agent's only client so ok to configure
+         msgQueueAdd(SZ_AR_FIRST_REGISTRATION);
+         break;
+      case RESTORE_STATE:
+         restoreReceiverState();   
+         break;
+   }
+   
+}
+
+
+// process commands from smart clients and ir remotes
+void processClientCmd(QueuedMsg * msg) {
+   const char * szCmd = msg->sz;
+   IrCmd * irCmd = msg->irCmd;
+   BOOL isZigbeeAsleep = isZrcCmdQueueEmpty(); 
+   BOOL isMsgChannelRequest = atoi(szCmd) && !irCmd && displayMode==TV;
+   struct rcCmd * cmd = cmdSzToRcCmd(isMsgChannelRequest ? SZ_CHANNEL : szCmd);
+   const char * szCmdArg = strlen(szCmd) > strlen(cmd->sz) ? &szCmd[strlen(cmd->sz) + 1] : NULL;
+   static BOOL refreshEnable=TRUE, tvGuide=FALSE;
+   int i, appId = getForegroundWindowAppID();
+   
+   const char * channelPrefix = cmd->id==CHANNEL ? "channel " : "";
+   const char * undefinedSuffix = cmd->id==UNDEFINED ? " undefined" : "";
+   printf("\nprocessClientCmd: %s%s%s\n", channelPrefix, szCmd, undefinedSuffix);
+      
+   if (irCmd)
+      printf("%s", irCmd->debug);
+   
+   switch (cmd->id) {
+      case AR_FIRST_REGISTRATION:
          if (displayMode==UNDEFINED) {
             sendArCmd(SZ_FRONT_SPEAKERS_ON);
             sendArCmd(szDefaultMasterVolume);
@@ -170,297 +309,78 @@ void processArAgentNotification(char * msg) {
             setAudioSource(displayMode);
          }   
          break;
-      case RESTORE_STATE:
-         restoreReceiverState();   
-         break;
-      default:
-         break;
-   }
-   
-}
-
-// handle arAgent and itach notifications
-void processAgentNotification(const char * agent, char * msg) {
-   if (!strcmp(agent, arAgentSd.host))
-      processArAgentNotification(msg);
-   else {
-      printf("processAgentNotification from %s: %s\n", agent, msg);
-      if (strstr(msg, "completeir"))
-         itachCmd.irComplete=TRUE;
-   }      
-}
-
-void processClientDisconnect() {}
-void processServerConnect(const char * agent) {
-   if (!strcmp(agent, arAgentSd.host) && tvPowered) {
-         sendArCmd(SZ_REREGISTER);
-   }
-}
-      
-void sendArCmd(const char * szCmd) {
-   if (arAgentSocket) 
-      sendMsg(&arAgentSd, szCmd);
-}
-
-// the default sendItachCmd has parameters where subsequent sendItachCmds are
-// INDEPENDENT and zero processing command delay
-void sendItachCmd(int id, int mode) { sendItachCmd(id, mode, INDEPENDENT, 0); }
-
-// queue up a sendItachCmdThread
-void sendItachCmd(int id, int mode, int dependent, int delay) {
-   static int sequence=0;
-   struct rcCmd * cmd = cmdIdToRcCmd(id);
-  
-   if (!cmd->irTx || !(mode==TV_MODE || mode==DVD_MODE))
-      return;
-      
-   struct irTx * irTx = &cmd->irTx[mode];
-  
-   if (!dependent)
-      itachCmd.prerequisiteFailure=FALSE;
-   
-   if (debug)
-      printf("sendItachCmd: %s\n", irTx->sz);
-   else if (itachSocket && irTx->code) {
-      sendItachCmdThreadStart(new ItachCmdParam(irTx, dependent, sequence++, delay));
-   }      
-}
-
-
-void restoreReceiverState() {
-  sendArCmd(tiraCmdIdToSz(AUDIO_POWER_ON));
-  sendArCmd(SZ_VIDEO_AUX);
-  sendArCmd(tiraCmdIdToSz(rearSpeakerState));
-  sendArCmd(tiraCmdIdToSz(frontSpeakerState));
-  sendArCmd(tiraCmdIdToSz(bSpeakerState));
-  sendArCmd(tiraCmdIdToSz(MASTER_VOLUME));
-  sendArCmd(tiraCmdIdToSz(CENTER_VOLUME));
-  sendArCmd(tiraCmdIdToSz(SURROUND_VOLUME));
-  sendArCmd(tiraCmdIdToSz(SUBWOOFER_VOLUME));
-  sendArCmd(tiraCmdIdToSz(surroundProfile));
-  sendArCmd(tiraCmdIdToSz(station));
-  sendArCmd(tiraCmdIdToSz(audioSource));
-  sendArCmd(tiraCmdIdToSz(audioPowerState));
-  sendArCmd(tiraCmdIdToSz(muteState));
-}
-
-
-void sendStateInformation() {
-  sendMsg(tiraCmdIdToSz(audioPowerState));
-  sendMsg(SZ_VIDEO_AUX);
-  sendMsg(tiraCmdIdToSz(rearSpeakerState));
-  sendMsg(tiraCmdIdToSz(frontSpeakerState));
-  sendMsg(tiraCmdIdToSz(bSpeakerState));
-  sendMsg(tiraCmdIdToSz(MASTER_VOLUME));
-  sendMsg(tiraCmdIdToSz(CENTER_VOLUME));
-  sendMsg(tiraCmdIdToSz(SURROUND_VOLUME));
-  sendMsg(tiraCmdIdToSz(SUBWOOFER_VOLUME));
-  sendMsg(tiraCmdIdToSz(surroundProfile));
-  sendMsg(tiraCmdIdToSz(station));
-  sendMsg(tiraCmdIdToSz(audioSource));
-  sendMsg(tiraCmdIdToSz(muteState));
-}   
-   
-
-// return TRUE if given irRx has capturedCode in it's array of possible codes
-int irRxHasCode(struct irRx * irRx, char const * capturedCode) {
-
-   int j,k;
-   const char * tableCode;
-   
-   for(j=0; irRx && j<irRx->size; j++) {
-      tableCode = irRx->code[j];
-      
-      for (k=0;
-           k<CMD_CODE_LENGTH &&
-           capturedCode[k]==tableCode[k]; k++);
-           
-      if (k==CMD_CODE_LENGTH)
-         return TRUE;
-   }    
-   
-   return FALSE;
-}                
-
-
-// return the remote control command structure associated with the
-// given tira ir code string
-struct rcCmd * irRxCmdToRcCmd(char const * capturedCmd) {
-
-   int i,j,k;
-   const char * tableCode;
-   
-   for (i=0; i<sizeof(rcCmd)/sizeof(struct rcCmd); i++) {
-      for(j=0; rcCmd[i].irRx && j<rcCmd[i].irRx->size; j++) {
-         tableCode = rcCmd[i].irRx->code[j];
-         
-         for (k=0;
-              k<CMD_CODE_LENGTH &&
-              capturedCmd[k]==tableCode[k]; k++);
-              
-         if (k==CMD_CODE_LENGTH)
-            return &rcCmd[i];
-      }    
-   }
-   
-   return &rcCmd[UNDEFINED];
-
-}                
-
-
-// tira callback for ir remote clients (e.g. itach, universal remote, etc.)
-int __stdcall irRxCmdCallback(char const * capturedCmd) {
-
-   static unsigned sequence=0;
-   DWORD discardPeriod=0;
-   int duplicate=FALSE;
-   char irRxDebug[1024];
-      
-   struct rcCmd * cmd = irRxCmdToRcCmd(capturedCmd);
-   irRxTime=GetTickCount();
-   
-   if (cmd->id == UNDEFINED) {      
-      snprintf(irRxDebug, 
-         sizeof(irRxDebug),
-         "Notice: capturedCmd msg match not found for %s\n", 
-         capturedCmd); 
-   }
-   else {
-      discardPeriod = cmd->id==VIDEO_POWER ? 5000 : 500;
-      duplicate = GetTickCount() - cmd->irRx->timestamp < discardPeriod;
-      snprintf(irRxDebug,  
-         sizeof(irRxDebug),
-         "%s %s: %s->%s\n",
-         duplicate ? "irRx discarding duplicate" : "irRx match found",
-         szTime(),
-         capturedCmd, 
-         cmd->irRx->sz);
-      // timestamp receipt to throw away repeated commands generated when a user
-      // presses and holds down a universal remote button 
-      cmd->irRx->timestamp=GetTickCount();
-   } 
-      
-   if (irRxHasCode(itachCmd.irRxPending, capturedCmd)) {
-      strncpy(itachCmd.debug, irRxDebug, sizeof(itachCmd.debug)); 
-      itachCmd.irRxPending = NULL;
-      return 0;
-   }   
-   
-   if (cmd->id == IR_IGNORE ||
-       (duplicate || cmd->id == UNDEFINED) && !isConsoleMode() ) {
-       // no need to report IR_IGNORE (itach IR commands) OR
-       // report duplicate OR UNDEFINED commands unless in console mode  
-      return 0;
-   }   
-   
-   // start a thread to process tira cmds sequentially
-   tiraCmdThreadStart(new TiraCmd(cmd->sz, irRxDebug, duplicate, sequence++));
-   
-   return 0;
-}
-
-
-void tiraCmdThreadStart(TiraCmd * param) {
-   HANDLE hThread;
-   if (hThread=CreateThread(
-         NULL,    // default security
-         0,       // default stack size
-         (LPTHREAD_START_ROUTINE) tiraCmdThread,
-         param,   // thread parameter
-         0,       // run thread immediately
-         NULL)    // ignore thread id
-      ) {
-      CloseHandle(hThread);
-   } else {
-      printf("tiraCmdThreadStart failed\n");
-   }   
-}
-
-
-DWORD tiraCmdThread(LPVOID param) {
-   TiraCmd * tiraCmd = (TiraCmd *) param;
-   
-   while (tiraCmd->sequence != tiraCmdActive ||
-          isLocked("tiraCmdThread")) {
-      Sleep(10);
-   }
-              
-   processClientCmd(tiraCmd->sz, tiraCmd);
-   tiraCmdActive++;
-   delete tiraCmd;
-   unlock();
-}   
- 
-
-// socket callback for smart remote clients 
-void processClientCmd(const char * szCmd) {
-   processClientCmd(szCmd, NULL);  // process message
-}
-
-
-// common function used by smart and ir remote callback routines
-void processClientCmd(const char * szCmd, TiraCmd * tiraCmd) {
-
-   struct rcCmd * cmd = cmdSzToRcCmd(szCmd);
-   const char * szCmdArg = strlen(szCmd) > strlen(cmd->sz) ? &szCmd[strlen(cmd->sz) + 1] : NULL;
-   static BOOL refreshEnable=TRUE, isTiraCmd=FALSE;
-   int i, appId = getForegroundWindowAppID();
-   
-   if (tiraCmd) {
-      isTiraCmd=TRUE;
-      printf("%s", tiraCmd->debug);
-      if (tiraCmd->duplicate || cmd->id==UNDEFINED)
-         return;
-   }      
-   
-   printf("processClientCmd: %s%s\n", szCmd, cmd->id==UNDEFINED ? " undefined" : "");
-   
-   switch (cmd->id) {
+      case AR_MODE:
+         if (displayMode==UNDEFINED && tvPowered) { 
+            nextMode=displayMode=cmdSzToRcCmdId(szCmdArg);
+            // initialize the current displayMode according to a registered 
+            // client's audio state by setting the TV input 
+            //  tv: video input menu+4 (source hdmi switch)
+            // dvd: video input menu+2 (source dvd)
+            // dvr: video input menu+4 (source hdmi switch)
+            sendItachCmd(VIDEO_INPUT_MENU, TV_MODE, INDEPENDENT, 1500);
+            sendItachCmd(displayMode, TV_MODE, DEPENDENT, 4000);   
+            
+            // and the hdmi switch source
+            setVideoSource(displayMode);
+         }
+         break;   
       case ARROW_LEFT:
          // disable surround sound or big/chapter jump back
          if (displayMode == DVR) {
-            if (appId == NETFLIX) {
-               // shift-left nine 10 second periods (90)
-               sendVirtualKeyCode(KBD_LEFT_ARROW_SHIFT, 9);
-            } else if (appId == VLC) {
-               // jump back a chapter
-               sendVirtualKeyCode(KBD_SHIFT_P, 1);
-            } else if (appId == WMC) {             
-               // ctrl-b thirteen 7 second periods (91)
-               sendVirtualKeyCode(KBD_CTRL_B, 13);
-            } else if (appId == YOUTUBE) {
-               // left arrow eighteen 5 second periods (90) 
-               sendVirtualKeyCode(KBD_LEFT_ARROW, 18);
-            } else {
-               setSurroundSound(OFF);
+            switch(appId) {
+               case NETFLIX:
+                  // shift-left nine 10 second periods (90)
+                  sendVirtualKeyCode(KBD_LEFT_ARROW_SHIFT, 9);
+                  break;
+               case VLC:   
+                  // jump back a chapter
+                  sendVirtualKeyCode(KBD_SHIFT_P, 1);
+                  break;
+               case WMC:
+                  // ctrl-b thirteen 7 second periods (91)
+                  sendVirtualKeyCode(KBD_CTRL_B, 13);
+                  break;
+               case YOUTUBE:   
+                  // left arrow eighteen 5 second periods (90) 
+                  sendVirtualKeyCode(KBD_LEFT_ARROW, 18);
+                  break;
+               default:   
+                  setSurroundSound(OFF);
             }   
-         }   
-         else {   
+         }
+         else if (displayMode == TV)
+            zrcCmdQueueAdd(cmd->zrc);
+         else
             sendItachCmd(cmd->id, getRemoteMode());
-         }   
          break;     
       case ARROW_RIGHT:
          // enable surround sound or big/chapter jump forward  
          if (displayMode == DVR) {
-            if (appId == NETFLIX) {
-               // jump forward nine 10 second periods (90)
-               sendVirtualKeyCode(KBD_RIGHT_ARROW_SHIFT, 9);
-            } else if (appId == VLC) {
-               // jump forward a chapter
-               sendVirtualKeyCode(KBD_SHIFT_N, 1);
-            } else if (appId == WMC) {
-               // ctrl-f three 30 second periods (90)
-               sendVirtualKeyCode(KBD_CTRL_F, 3);
-            } else if (appId == YOUTUBE) {
-               // left arrow eighteen 5 second periods (90)
-               sendVirtualKeyCode(KBD_RIGHT_ARROW, 18);
-            } else {
-               setSurroundSound(ON);
+            switch(appId) {
+               case NETFLIX:
+                  // jump forward nine 10 second periods (90)
+                  sendVirtualKeyCode(KBD_RIGHT_ARROW_SHIFT, 9);
+                  break;
+               case VLC:
+                  // jump forward a chapter
+                  sendVirtualKeyCode(KBD_SHIFT_N, 1);
+                  break;
+               case WMC:
+                  // ctrl-f three 30 second periods (90)
+                  sendVirtualKeyCode(KBD_CTRL_F, 3);
+                  break;
+               case YOUTUBE:
+                  // left arrow eighteen 5 second periods (90)
+                  sendVirtualKeyCode(KBD_RIGHT_ARROW, 18);
+                  break;
+               default:   
+                  setSurroundSound(ON);
             }   
          }   
-         else {   
+         else if (displayMode == TV)
+            zrcCmdQueueAdd(cmd->zrc);
+         else  
             sendItachCmd(cmd->id, getRemoteMode());
-         }   
          break;
       case ARROW_DOWN:
       case ARROW_UP:
@@ -478,45 +398,69 @@ void processClientCmd(const char * szCmd, TiraCmd * tiraCmd) {
                }   
             }   
             else {  
-               // streaming or live tv surround sound control
-               setSurroundSound(cmd->id==ARROW_UP ? ON : OFF);
+               if(tvGuide && displayMode==TV)
+                  zrcCmdQueueAdd(cmd->zrc);
+               else {   
+                  // streaming or live tv surround sound control
+                  setSurroundSound(cmd->id==ARROW_UP ? ON : OFF);
+               }   
             }
          }    
+         break;
+      case CHANNEL:   
+         sendZigbeeChannelRequest(szCmd);
          break;
       case EJECT:
          // eject regardless of mode because it only applies to a DVD
          sendItachCmd(EJECT, DVD_MODE);
          break;
+      case EXIT_PAGE:
+         if (displayMode==TV)
+            tvGuide=FALSE;   
+         sendDefault(cmd);
+         break;
+      case FEEDBACK_TV_MENU:   
+         sendItachCmd(MENU, TV_MODE);     // display tv menu to inform user command queued
+         break;
+      case FEEDBACK_TV_RETURN:   
+         sendItachCmd(RETURN, TV_MODE);   // erase tv menu used to inform user command queued
+         break;
+      case GET_STATE:
+         sendStateInformation(msg);
+         break;
+      case GUIDE:
+         if (displayMode==TV)
+            tvGuide=TRUE;
+         sendDefault(cmd);
+         break;
       case LAUNCH_EXPLORER:
          launchExplorer(szCmdArg);
          break;   
-      case MUTE:
-         if (!szCmdArg) {
-            (muteState==MUTE_ON ) ? sendArCmd(SZ_MUTE_OFF) : sendArCmd(SZ_MUTE_ON);
-         } else if (strstr(szCmdArg, "off")) {
-            sendArCmd(SZ_MUTE_OFF);
-         } else if (strstr(szCmdArg, "on")) {
-            sendArCmd(SZ_MUTE_ON);
-         } 
-         break;
-      case VIDEO_POWER:
-         if (!szCmdArg || 
-             strstr(szCmdArg, "off") && tvPowered ||
-             strstr(szCmdArg, "on") && !tvPowered) { 
-            toggleVideoPower();
+      case MENU:
+         static DWORD irRxMenuTime;
+         switch (displayMode) {
+            case TV:
+               tvGuide=TRUE;
+               sendDefault(cmd);
+               break;
+            case DVR:
+               refreshEnable=TRUE;
+               setNextForegroundWindow();
+               break;
+             case DVD:
+               if (irCmd) {
+                  if (queuedIrRxTime - irRxMenuTime < 10000) {
+                     // universal remote DVD eject hack (no eject button on remote)
+                     // user pressed menu button twice within 10 seconds
+                     sendItachCmd(EJECT, DVD_MODE);
+                     break;
+                  } 
+                  irRxMenuTime=queuedIrRxTime;
+               }
+            default:   
+               sendDefault(cmd);
          }   
          break;
-      case REWIND:
-         if (appId == WMC) {             
-            // ctrl-b four 7 second periods to approximate a 30 second CTRL_F
-            sendVirtualKeyCode(KBD_CTRL_B, 2);
-         } else {
-            sendDefault(cmd);
-         }
-         break;   
-      case SURROUND:
-         setSurroundSound(strstr(szCmdArg, "on") ? ON : OFF);
-         break;   
       case MODE:
          // set video and audio sources
          if (!isAudioFromVideo() && !szCmdArg) {
@@ -561,12 +505,83 @@ void processClientCmd(const char * szCmd, TiraCmd * tiraCmd) {
                   break;
             }
             printf("displayMode: round robin %s\n", cmdIdToRcCmd(nextMode)->sz); 
-            if (muteState==MUTE_OFF && displayMode==TV)
+            int mute = muteState==MUTE_OFF && displayMode==TV;
+            
+            if (mute)
                sendArCmd(SZ_MUTE_ON);
-            else
-               menuFlashThreadStart();   // flash menu for ir remote feedback 
-            videoModeChangeThreadStart(nextMode);
+               
+            videoModeChangeThreadStart(!mute, nextMode);
          }
+         break;
+      case MUTE:
+         if (!szCmdArg) {
+            (muteState==MUTE_ON ) ? sendArCmd(SZ_MUTE_OFF) : sendArCmd(SZ_MUTE_ON);
+         } else if (strstr(szCmdArg, "off")) {
+            sendArCmd(SZ_MUTE_OFF);
+         } else if (strstr(szCmdArg, "on")) {
+            sendArCmd(SZ_MUTE_ON);
+         } 
+         break;
+      case NEXT_WINDOW:
+         if (displayMode==DVR) {
+            refreshEnable=TRUE;
+            setNextForegroundWindow();
+         } 
+         break;
+      case OK:
+         if (displayMode==TV)
+            tvGuide=FALSE;   
+         sendDefault(cmd);
+         break;
+      case PLAY:
+         if (displayMode==DVR) {
+            if (appId==APP_UNKNOWN) {
+               // explorer window or desktop icon
+               refreshEnable=TRUE;
+               sendVirtualKeyCode(KBD_ENTER, 1);
+               break;
+            } else if (irCmd) {
+               // disable play/pause toggle when a DVR video is playing
+               //
+               // plasma tv ir noise can cause a fast forward commmand to get 
+               // captured as a play/pause toggle command because the current
+               // set of definitions only differ by one bit:
+               // vcrFastForward: 0x1C16
+               //        vcrPlay: 0x1E16 
+               //
+               // ultimately need to eliminate plasma tv generated ir noise
+               // this problem does not occur when plasma tv display is off
+               printf("Notice: ir play command disabled\n");
+               break;
+            }
+         }      
+         sendDefault(cmd);
+         break;
+      case RESTORE_STATE:
+         restoreReceiverState();
+         break;
+      case REWIND:
+         if (appId == WMC) {             
+            // ctrl-b four 7 second periods to approximate a 30 second CTRL_F
+            sendVirtualKeyCode(KBD_CTRL_B, 2);
+         } else {
+            sendDefault(cmd);
+         }
+         break;   
+      case STOP:
+         if (displayMode==TV)
+            tvGuide=FALSE;   
+         sendDefault(cmd);
+         break;
+      case SURROUND:
+         setSurroundSound(strstr(szCmdArg, "on") ? ON : OFF);
+         break;   
+      case VIDEO_POWER:
+         if (!szCmdArg || 
+             strstr(szCmdArg, "off") && tvPowered ||
+             strstr(szCmdArg, "on") && !tvPowered) { 
+            toggleVideoPower();
+         }   
          break;
       case VOLUME_UP:
          sendArCmd(SZ_MASTER_VOLUME_UP);
@@ -574,61 +589,58 @@ void processClientCmd(const char * szCmd, TiraCmd * tiraCmd) {
       case VOLUME_DOWN:
          sendArCmd(SZ_MASTER_VOLUME_DOWN);
          break;
-      case MENU:
-      case NEXT_WINDOW:
-         if (displayMode==DVR) {
-            refreshEnable=TRUE;
-            setNextForegroundWindow();
-         } else {
-            sendItachCmd(cmd->id, getRemoteMode());
-         }   
-         break;
-      case RESTORE_STATE:
-         restoreReceiverState();
-         break;
-      case GET_STATE:
-         sendStateInformation();
-         break;
-      case EXIT:
+      case EXIT_PROCESS:
+         if (exiting) {
+            printf("Exit previously requested, forcing exit\n");
+            exit(0);
+         }
+            
          printf("Exiting...\n");
+         exiting=TRUE;
+         
          if (tvPowered) {
             toggleVideoPower();
             Sleep(6000);
-         }   
-         stty_buffered(); 
+         }
+         
+         rfClose();   
          shutdownServer();
          rxClientThreadExit(&arAgentSd);
          rxClientThreadExit(&itachSd);
+         
+         while(areSocketThreadsRunning())
+            Sleep(500); 
+         
          WSACleanup();
          unloadTiraDll();
-         FreeLibrary(handle);
+         printConsoleLogMsgs();   
+         printf("Exit complete\n");
          
-         if (ttyExit) {
-            ttyExit=FALSE;
-            DWORD count;
-            WriteConsoleInput(GetStdHandle(STD_INPUT_HANDLE), 
-               inputQ, sizeof(inputQ)/sizeof(INPUT_RECORD), &count);
-         } 
-         
-         if (!isConsoleMode()) exit(0);
-         
-         break;
-      case PLAY:
-         if (displayMode==DVR && appId==APP_UNKNOWN) {
-            refreshEnable=TRUE;
-            sendVirtualKeyCode(KBD_ENTER, 1);
-            break;
-         }
+         if (isConsoleMode())
+            tty_buffering(TRUE);
+            
+         exit(0);
       default:
          sendDefault(cmd);
          break;
    }
+   
+   if (isZigbeeAsleep && !isZrcCmdQueueEmpty()) {
+      wakeupRNP();
+      do Sleep(100); while (!isZrcCmdQueueEmpty());
+   }   
 }
 
 
+// translate and send an ir remote or smart client command based on the 
+// active mode (tv, dvd, dvr)
+// e.g. a generic pause command will translate differently for live tv,
+// a dvd, or a media player application 
 void sendDefault(struct rcCmd * cmd) {
-   if (displayMode==DVR)
+   if (displayMode==DVR && getVirtualKeyCode(cmd))
       sendVirtualKeyCode(getVirtualKeyCode(cmd), 1);
+   else if (displayMode==TV && cmd->zrc)
+      zrcCmdQueueAdd(cmd->zrc);
    else
       sendItachCmd(cmd->id, getRemoteMode());
 }
@@ -636,11 +648,11 @@ void sendDefault(struct rcCmd * cmd) {
 
 void toggleVideoPower() {
    const char * szState = tvPowered ? " OFF" : " ON";
-   char szCmd[strlen(SZ_VIDEO_POWER) + strlen(szState) + 1];
+   char * szCmd = (char *) malloc(strlen(SZ_VIDEO_POWER) + strlen(szState) + 2);
    tvPowered = ~tvPowered;
    if (tvPowered) {
       sendArCmd(SZ_REGISTER);
-      toggleDvdPower(displayMode);
+      setDvdPower(displayMode);
    }   
    else {
       if (displayMode!=TV)
@@ -651,13 +663,11 @@ void toggleVideoPower() {
       sendArCmd(SZ_DEREGISTER);
    }
    
-   if (tvPowered)
-      sendItachCmd(RETURN, TV_MODE);   // panasonic TV hack to reset ir receiver state
-      
    sendItachCmd(VIDEO_POWER, TV_MODE, INDEPENDENT, tvPowered ? VIDEO_POWER_ON_DELAY : 0);
    
    sprintf(szCmd, "%s %s", SZ_VIDEO_POWER, szState);
    updateState(szCmd);
+   free(szCmd);
 }   
 
 
@@ -679,21 +689,75 @@ void setSurroundSound(int state) {
    }
 }   
 
-// set the audio source to the associated videoMode
-void setAudioSource(int videoMode) {
-   switch(videoMode) {
-      case DVR:
-         sendArCmd(getHostname());
-         break;
+// translate the given audioSource to the associated video mode
+int getVideoMode(int audioSource) {    
+   switch (audioSource) {
       case TV:
       case DVD:
-      case VIDEO_AUX:
-         sendArCmd(tiraCmdIdToSz(videoMode));   
-         break;
+         return audioSource;
+      case LVR_MM:
+      case DEN_MM:
+         return DVR;
       default:
-         printf("setAudioSource: unknown source %s\n", tiraCmdIdToSz(videoMode));   
-         break;
+         return UNDEFINED;
    }      
+}
+
+
+// set the audio source and enable surround sound for a DVD
+void setAudioMode(int requestedMode) {
+   printf("setAudioMode: %s\n", cmdIdToRcCmd(requestedMode)->sz); 
+   setSurroundSound(requestedMode==DVD);
+   setAudioSource(requestedMode);
+}   
+
+
+// set the audio/video source, the surround sound, and turn the 
+// DVD player on in DVD mode
+void setVideoMode(int requestedMode) {
+
+   int previousMode=displayMode;
+   printf("setVideoMode: %s\n", cmdIdToRcCmd(requestedMode)->sz); 
+   
+   if (isAudioFromVideo()) 
+      setAudioSource(VIDEO_AUX);   // pseudo mute   
+   
+   setDvdPower(requestedMode);
+   
+   nextMode=displayMode=requestedMode;
+   
+   if (previousMode==DVD || requestedMode==DVD) {
+      setSpeakerVolume(SZ_CENTER_VOLUME,
+                       requestedMode==DVD ? SZ_DEFAULT_CENTER_VOLUME_DVD :
+                                            SZ_DEFAULT_CENTER_VOLUME);
+      // change the TV's input source                               
+      // delay values give the TV time to bring up the menu and commit the change
+      //  tv: video input menu+4 (source hdmi switch)
+      // dvd: video input menu+2 (source dvd)
+      // dvr: video input menu+4 (source hdmi switch)
+      sendItachCmd(VIDEO_INPUT_MENU, TV_MODE, INDEPENDENT, 1500);
+      sendItachCmd(requestedMode, TV_MODE, DEPENDENT, 4000);
+   }
+   
+   // set the hdmi switch source   
+   setVideoSource(requestedMode);
+   
+   if (previousMode != displayMode) {
+      // notify clients
+      char * szCmd = (char *) malloc(strlen(SZ_MODE) + strlen(cmdIdToRcCmd(requestedMode)->sz) + 2);
+      sprintf(szCmd, "%s %s", SZ_MODE, cmdIdToRcCmd(requestedMode)->sz);
+      updateState(szCmd);
+      free(szCmd);
+   }   
+}
+
+
+// toggle dvd power if activating or deactivating dvd mode 
+void setDvdPower(int requestedMode) {
+   if (displayMode==DVD || requestedMode==DVD) { 
+      sendItachCmd(VIDEO_POWER, DVD_MODE);
+      dvdPowered = ~dvdPowered;
+   }
 }
 
 // return TRUE if the current audioSource corresponds to a video mode
@@ -710,71 +774,34 @@ BOOL isAudioFromVideo() {
    }      
 }
 
-// translate the given audioSource to the associated video mode
-int getVideoMode(int audioSource) {    
-   switch (audioSource) {
+void setAudioSource(int videoMode) {
+   switch(videoMode) {
+      case DVR:
+         sendArCmd(getHostname());
+         break;
       case TV:
       case DVD:
-         return audioSource;
-      case LVR_MM:
-      case DEN_MM:
-         return DVR;
+      case VIDEO_AUX:
+         sendArCmd(tiraCmdIdToSz(videoMode));   
+         break;
       default:
-         return UNDEFINED;
+         printf("setAudioSource: unknown source %s\n", tiraCmdIdToSz(videoMode));   
+         break;
    }      
 }
 
 
-void setAudioMode(int requestedMode) {
-   printf("setAudioMode: %s\n", cmdIdToRcCmd(requestedMode)->sz); 
-   setSurroundSound(requestedMode==DVD);
-   setAudioSource(requestedMode);
-}   
-
-
-// set the audio/video source, the surround sound, and turn the 
-// DVD player on in DVD mode
-void setVideoMode(int requestedMode) {
-
-   int previousMode=displayMode;
-   printf("setVideoMode: %s\n", cmdIdToRcCmd(requestedMode)->sz); 
-   
-   toggleDvdPower(requestedMode);
-   
-   nextMode=displayMode=requestedMode;
-   
-   if (isAudioFromVideo()) 
-      setAudioSource(VIDEO_AUX);   // pseudo mute   
-   
-   if (previousMode==DVD || requestedMode==DVD) {
-      // delay 2000 milliseconds before and after sending the DEPENDENT video
-      // MODE number for processing.  
-      // tv: video+4 (hdmi switch input)
-      // dvd: video+2 (dvd component input)
-      // dvr: video+4 (hdmi switch input)
-      sendItachCmd(MODE_MENU, TV_MODE, INDEPENDENT, 1500);
-      sendItachCmd(requestedMode, TV_MODE, DEPENDENT, 4000);
+void setSpeakerVolume(const char * prefix, const char * level) {
+   static int size=0;
+   static char * cmd = NULL;
+   if (size < strlen(prefix) + strlen(level) + 1) {
+      size = strlen(prefix) + strlen(level) + 1;
+      if (cmd)
+         free(cmd);
+      cmd = (char *) malloc(size);
    }
-   
-   // set the hdmi switch source   
-   setVideoSource(requestedMode);
-   
-   if (previousMode != displayMode) {
-      // notify clients
-      char szCmd[strlen(SZ_MODE) + strlen(cmdIdToRcCmd(requestedMode)->sz) + 2];
-      sprintf(szCmd, "%s %s", SZ_MODE, cmdIdToRcCmd(requestedMode)->sz);
-      updateState(szCmd);
-   }   
-}
-
-
-void toggleDvdPower(int requestedMode) {
-   if (requestedMode==DVD && !dvdPowered || 
-       requestedMode!=DVD && dvdPowered) {
-      sendItachCmd(VIDEO_POWER, DVD_MODE);
-      dvdPowered = ~dvdPowered;
-   }
-}
+   sendArCmd(strcat(strcpy(cmd, prefix), level));
+}           
 
 
 // send an ir command to set the hdmi switch source
@@ -802,154 +829,168 @@ void setVideoSource(int mode) {
    if (*videoSourceCmd->state==videoSource)
       return;
    
-   while (GetTickCount() - irRxTime < 550) {
+   while (GetTickCount() - irRxTime < IR_RX_QUIET_PERIOD) {
       // try to avoid ir remote interference
       Sleep(10);
    }
       
    if (!tiraTransmit(videoSource)) {
       updateState(videoSourceCmd->sz);
-      Sleep(4500);   // give the switch time to complete the request
+      Sleep(2500);   // give the switch time to complete the request
    }   
 }         
 
 
-void menuFlashThreadStart() {
+static struct {
+   BOOL threadActive=FALSE;
+   BOOL exitThread=TRUE;
+   BOOL flash;
+   int mode;
+} videoChange;       
+
+void videoModeChangeThreadStart(BOOL flash, int mode) {
    HANDLE hThread;
+   
+   videoChange.exitThread = TRUE;
+   
+   while(videoChange.threadActive)
+      Sleep(10);
+   
+   videoChange.threadActive=TRUE; videoChange.exitThread=FALSE;
+   videoChange.flash=flash; videoChange.mode=mode;
+   
    if (hThread=CreateThread(
          NULL,    // default security
          0,       // default stack size
-         (LPTHREAD_START_ROUTINE) menuFlashThread,
+         (LPTHREAD_START_ROUTINE) videoModeChangeThread,
          NULL,    // thread parameter
          0,       // run thread immediately
          NULL)    // ignore thread id
       ) {
       CloseHandle(hThread);
    } else {
-      printf("menuFlashThreadStart failed\n");
+      videoChange.threadActive = FALSE;
+      printf("videoModeChangeThreadStart failed\n");
    }   
 } 
 
-
-// flash a menu on the screen as feedback to a user that the system has queued 
-// up an IR command. This routine was specifically written for user feedback 
-// when iteratively toggling through video modes
-DWORD menuFlashThread(LPVOID param) {
-   static volatile LONG menu=FALSE;
-   while (isLocked(&menu))          // sequence menu flashes
-      Sleep(10);
-   sendItachCmd(MENU, TV_MODE);     // display menu
-   Sleep(2000);                     // allow user time to notice
-   sendItachCmd(RETURN, TV_MODE);   // erase menu
-   unlock(&menu);
-   ExitThread(0);
-}
-
-
-void videoModeChangeThreadStart(int mode) {
-   
-   if (videoChange.hThread) {
-      printf("VideoModeChangeThreadStart: terminating thread\n");
-      TerminateThread(videoChange.hThread, 0);
-      CloseHandle(videoChange.hThread);
-   }
-   
-   videoChange.mode = mode;   
-      
-   if ((videoChange.hThread=CreateThread(
-         NULL,      // default security
-         0,         // default stack size
-         (LPTHREAD_START_ROUTINE) videoModeChangeThread,
-         NULL,      // thread parameter
-         0,         // run thread immediately
-         NULL))     // ignore thread id
-      == NULL) {
-      printf("videoModeChangeThreadStart failed\n");
-   }
-}
-
-
+// let user iterate through video modes with an ir remote.  The function
+// that starts this thread will cause this thread to exit before starting
+// another thread.  If this thread times out, it will queue up a message
+// to change the video mode.  
+// This function flashes a menu on the screen to acknowledge a user that 
+// a video mode change request is pending
 DWORD videoModeChangeThread(LPVOID param) {
-   // give user time to iterate with ir remote to the desired mode
-   Sleep(4000);
-   CloseHandle(videoChange.hThread);
-   videoChange.hThread = NULL;
-   while (isLocked("videoModeChangeThread"))
-      Sleep(10);
-   setVideoMode(videoChange.mode);
-   setAudioMode(videoChange.mode);
-   unlock();
+   int i;
+   char szModeCmd[128];
+   
+   if (videoChange.flash)
+      msgQueueAdd(SZ_FEEDBACK_TV_MENU);   // display menu
+      
+   for (i=0; i<60 && !videoChange.exitThread; i++)
+      Sleep(50);   // give user 3 seconds to iterate to next mode
+      
+   if (videoChange.flash)
+      msgQueueAdd(SZ_FEEDBACK_TV_RETURN);   // erase menu
+      
+   if (!videoChange.exitThread) {
+      struct rcCmd * rcCmd = cmdIdToRcCmd(videoChange.mode);
+      strncat(strcpy(szModeCmd, "mode "), 
+              rcCmd->sz, sizeof(szModeCmd));
+      msgQueueAdd(szModeCmd);
+   }
+   
+   videoChange.threadActive = FALSE;
    ExitThread(0);
 }
 
 
-// queue an itach command retry thread with the ItachCmdParam parameters used 
-// to verify success of the requested itach IR command
-void sendItachCmdThreadStart(ItachCmdParam * retry) {
-   HANDLE hThread;
-   
-   if (hThread=CreateThread(
-         NULL,  // default security
-         0,     // default stack size
-         (LPTHREAD_START_ROUTINE) sendItachCmdThread,
-         retry, // thread parameter
-         0,     // run thread immediately
-         NULL)  // ignore thread id
-      ) {
-      CloseHandle(hThread);
-   } else {
-      printf("sendItachCmdThread create failed\n");
+// translate a numeric TCP/IP message to a series of zigbee commands that 
+// will change the paired set top box channel
+void sendZigbeeChannelRequest(const char * channel) {
+   if (atoi(channel)) {
+      int i;
+      char digit[2];
+      digit[1] = '\0';
+      for (i=0; i<strlen(channel); i++) {
+         digit[0] = channel[i];
+         zrcCmdQueueAdd(szToCercCmd(digit));
+      }
+      zrcCmdQueueAdd(&cercCmd[ZRC_OK]);
    }   
+}      
+         
    
+// the default sendItachCmd has parameters where subsequent sendItachCmds are
+// INDEPENDENT and zero processing command delay
+void sendItachCmd(int id, int mode) { sendItachCmd(id, mode, INDEPENDENT, 0); }
+
+// set up parameters and call the function to process an itach command request
+void sendItachCmd(int id, int mode, int dependent, int delay) {
+   struct rcCmd * cmd = cmdIdToRcCmd(id);
+  
+   if (!cmd->irTx || !(mode==TV_MODE || mode==DVD_MODE))
+      return;
+      
+   struct irTx * irTx = &cmd->irTx[mode];
+   
+   if (!irTx->code) {
+      printf("sendItachCmd: error no %s codes for irTx %s\n", remoteModeToSz(mode), irTx->sz);
+      return;
+   }   
+  
+   if (!dependent)
+      itachCmd->prerequisiteFailure=FALSE;
+   
+   if (debug)
+      printf("sendItachCmd: %s\n", irTx->sz);
+      
+   if (itachSd.socket!=INVALID_SOCKET && irTx->code) {
+      itachCmd->set(irTx, dependent, delay);
+      processItachCmd();
+   }   
 }
 
-
-// pace, serialize and confirm success of itach command requests
-DWORD sendItachCmdThread(LPVOID param) {
-   ItachCmdParam * itachCmdParam = (ItachCmdParam *) param;
-   const char * szCode = itachCmdParam->irTx->code;
-   const char * szDesc = itachCmdParam->irTx->sz;
-   struct irRx * irRx = itachCmdParam->irRx;
-   int sequence = itachCmdParam->sequence;
-   int dependent=itachCmdParam->dependent;
-   int delay=itachCmdParam->delay;
+// send an itach command request and report success or failure
+// pace sending the itach cmd retryMax times or until success is confirmed
+void processItachCmd() {
+   const char * szCode = itachCmd->irTx->code;
+   const char * szDesc = itachCmd->irTx->sz;
+   struct irRx * irRx = itachCmd->irRx;
+   int dependent=itachCmd->dependent;
+   int delay=itachCmd->delay;
    HANDLE hThread;
-   int retry, retryMax=3, replyWait;
+   int retry, retryMax=2, replyWait;
    
    for (retry=0; retry<retryMax; retry++) {
       
-      while (sequence!=itachCmd.sequence ||         // sequence itach messaging
-             GetTickCount() - irRxTime < 550 ||     // avoid ir remote interference
-             isLocked("sendItachCmdThread")) {      // serialize msg processing
-         Sleep(10);
-      }
+      // pace to avoid ir remote interference
+      while (GetTickCount() - irRxTime < 550 )
+         Sleep(50);
          
-      if (dependent && itachCmd.prerequisiteFailure) {
-         // bail because the prerequisite sendItachCmd failed
-         printf("sendItachCmdThread: exiting dependent sendItachCmd retry thread %s\n", szDesc);
-         unlock();
-         delete itachCmdParam;
-         ExitThread(0);
+      if (dependent && itachCmd->prerequisiteFailure) {
+         // warn prerequisite processItachCmd failed to confirm
+         printf("processItachCmd: warning prerequisite processItachCmd failed to confirm %s\n", szDesc);
+         return;
       }
       
       if (retry) {
-         printf("sendItachCmdThread attempting retry %d: %s\n", retry, szDesc);
-         printf("   irRxPending: %d && irComplete: %d\n", 
-            itachCmd.irRxPending!=NULL, itachCmd.irComplete);
+         printf("processItachCmd attempting retry %d irTx %s irRxPending: %d irComplete: %d\n\n", 
+            retry, szDesc, itachCmd->irRxPending!=NULL, itachCmd->irComplete);
+         Sleep(4000);  // let menu screens time out  
       } 
          
-      if (itachSocket) {
-         itachCmd.irRxPending=irRx;
-         itachCmd.irComplete=FALSE;
+      if (itachSd.socket!=INVALID_SOCKET) {
+         itachCmd->irRxPending=irRx;
+         itachCmd->irComplete=FALSE;
          
          // try to recover with an immediate resend if itach connection lost
          setReconnectMsg(&itachSd, szCode, szDesc);   
          
+         printf("processItachCmd requesting %s: %s\n", szTime(), szDesc); 
          sendMsg(&itachSd, szCode, szDesc);
       }   
          
-      unlock();
-      
       if (delay) {
          // allow itach commands time to process 
          // e.g. tv power on, video menu pop up, etc
@@ -957,37 +998,34 @@ DWORD sendItachCmdThread(LPVOID param) {
       }   
          
       for (replyWait=0; 
-          !(!itachCmd.irRxPending && itachCmd.irComplete || replyWait>1500); 
+          !(!itachCmd->irRxPending && itachCmd->irComplete || replyWait>1500); 
           replyWait+=10) {
-         // wait for the requested ir code and a "completeir" tcp message from the
-         // itach or a timeout
+         // wait for the requested ir code AND a "completeir" tcp message from the
+         // itach OR a replyWait timeout
+         // Allow irRxPending to preempt a repyWait timeout but do not consider an
+         // irRxPending timeout an error because plasma tv background noise makes 
+         // confirmation unreliable.  Currently unable to locate the ir receiver
+         // where it does not pick up ir noise from the plasma tv display   
          Sleep(10);
       }
       
-      if (!itachCmd.irRxPending && itachCmd.irComplete)
+      if (itachCmd->irComplete)  // && !itachCmd->irRxPending)
          break;
    }
    
-   while (isLocked("sendItachCmdThread 2"))
-      Sleep(10);
-         
-   if (!itachCmd.irRxPending && itachCmd.irComplete) {
-      // irRxCmdCallback received the expected IR code AND
+   if (itachCmd->irComplete) { // && !itachCmd->irRxPending) {
       // a "completeir" tcp message was received from the itach
-      printf("%s", itachCmd.debug);
-      printf("sendItachCmdThread success: %s\n\n", szDesc); 
+      printf("%s", itachCmd->debug);
+      printf("processItachCmd success %s: %s\n\n", szTime(), szDesc); 
    }
    else {    
-      printf("sendItachCmdThread failure: %s\n", szDesc); 
-      printf("   irRxPending: %d && irComplete: %d\n", itachCmd.irRxPending!=NULL, itachCmd.irComplete);
+      printf("processItachCmd failed irTx %s %s irRxPending: %d irComplete: %d\n\n", 
+             szDesc, szTime(), itachCmd->irRxPending!=NULL, itachCmd->irComplete);
       if (!dependent)
-         itachCmd.prerequisiteFailure = TRUE;
+         itachCmd->prerequisiteFailure = TRUE;
    }   
    clrReconnectMsg(&itachSd);
-   itachCmd.sequence++;  // move on to process the next itach message
-   unlock();
-   delete itachCmdParam;
-   ExitThread(0);
+   Sleep(IR_RX_QUIET_PERIOD);   // pause to minimize interference
 }
 
     
@@ -1015,29 +1053,25 @@ int getForegroundWindowAppID() {
 }
 
 
-void errMsgExit(char * msg) {
-   MessageBox(
-       NULL,
-       msg,
-       "Launch Video",
-       MB_ICONERROR | MB_OK
-   );
-   exit(1);
-}
+BOOL isVideoPlayerActive() {
+   int appId = getForegroundWindowAppID();
+   return (appId==NETFLIX || appId==VLC ||
+           appId==WMC || appId==YOUTUBE);
+}           
 
 
 // setNextForegroundWindow uses GetNextWindow and GetWindowText to 
 // maintain a list of windows that partially match an entry in the 
-// titleList array.  After updating the list the next round-robin
+// titles array.  After updating the list the next round-robin
 // entry in the list is used to call SetForegroundWindow.  If no windows
 // with partially matching titles exist, SetForegroundWindow is not called.
 //
-// Although titleList can contain any arbitrary window title, the intended
-// use is to iterate over explorer windows.  In order to differentiate
-// explorer windows, it is important for the title to fully qualify the
-// current path.  In any explorer window, go to Organize/Folder Options/View 
-// and check "Display the full path in the title bar (Classic theme only)"
-
+// Although the titles array can contain the partial name of any arbitrary 
+// window title, the intended use is to iterate over explorer windows.  
+// In order to differentiate explorer windows, it is important for the title 
+// to fully qualify the current path.  In any explorer window, go to 
+// Organize/Folder Options/View and check "Display the full path in the title 
+// bar (Classic theme only)"
 void setNextForegroundWindow() {
    unsigned i, titleLen;
    char title[1024];
@@ -1053,12 +1087,18 @@ void setNextForegroundWindow() {
    struct winInfo {
       char title[1024];
       HWND hWnd;
-      unsigned count;  // number of windows partially matching an entry in titleList
+      unsigned count;  // # of windows partially matching an entry in the titles array
    } * wi;
    
    const char * titles[] = {
       "I:\\Recorded TV",
-      "I:\\home\\jhm\\video\\lnk"
+      "I:\\home\\jhm\\video\\lnk",
+      "Windows Media Center",
+      "Netflix - ",
+      "YouTube - ",
+      "youtube.com",
+      "VLC media player",
+      "Microsoft Silverlight"
    };
    
    if (!dwl)
@@ -1067,15 +1107,15 @@ void setNextForegroundWindow() {
    for (dwl=dwl->first(); dwl->isNotLast(); dwl=dwl->next())
       ((winInfo *)dwl->get())->count=0;
    
-   // iterate through every desktop window.  If a titles entry
-   // partially matches a window's title, save the window's handle
-   // to a windowList struct and increment the count.  This loop 
-   // effectively refreshes the current list of desktop windows
+   // iterate to refresh the list of matching desktop windows.  If a titles[] 
+   // entry partially matches a window title, add that HWND to the dwl list
    while(hWnd) {
       titleLen = GetWindowText(hWnd, title, sizeof(title));
       for (i=0; titleLen>0 && i<sizeof(titles)/sizeof(char *); i++) {
-         if (strstr(title,titles[i])) {
-            // this window's title matches or is a subdirectory of titles[i]
+         if (strstr(title,titles[i]) && IsWindowVisible(hWnd)) {
+            // titles[i] partially matches this HWND's title AND
+            // this HWND has a visible window (a process may have one 
+            // or more HWNDs with hidden windows)
             for (dwl=dwl->first(); dwl->isNotLast(); dwl=dwl->next()) {
                wi=(struct winInfo *)dwl->get();
                if (strstr(wi->title, title)) {
@@ -1175,9 +1215,10 @@ void launchExplorer(const char * path) {
          printf("launchExplorer: Error SYSTEMROOT environment variable not defined\n");
          return;
       }   
-      char exe[strlen(systemRoot) + strlen(explorer) + 1];
+      char * exe = (char *) malloc(strlen(systemRoot) + strlen(explorer) + 1);
       strcat(strcpy(exe, systemRoot), explorer); 
       createProcess(exe, path);
+      free(exe);
    }
 }
 
@@ -1211,6 +1252,88 @@ char * getForegroundWindowImageFileName(char * szProcessName) {
 
    return szProcessName;
 }
+
+
+// requested by audio receiver agent at startup
+void restoreReceiverState() {
+  sendArCmd(tiraCmdIdToSz(AUDIO_POWER_ON));
+  sendArCmd(SZ_VIDEO_AUX);
+  sendArCmd(tiraCmdIdToSz(rearSpeakerState));
+  sendArCmd(tiraCmdIdToSz(frontSpeakerState));
+  sendArCmd(tiraCmdIdToSz(bSpeakerState));
+  sendArCmd(tiraCmdIdToSz(MASTER_VOLUME));
+  sendArCmd(tiraCmdIdToSz(CENTER_VOLUME));
+  sendArCmd(tiraCmdIdToSz(SURROUND_VOLUME));
+  sendArCmd(tiraCmdIdToSz(SUBWOOFER_VOLUME));
+  sendArCmd(tiraCmdIdToSz(surroundProfile));
+  sendArCmd(tiraCmdIdToSz(station));
+  sendArCmd(tiraCmdIdToSz(audioSource));
+  sendArCmd(tiraCmdIdToSz(audioPowerState));
+  sendArCmd(tiraCmdIdToSz(muteState));
+}
+
+
+// requested by a client at startup
+void sendStateInformation(QueuedMsg * msg) {
+  sendMsg(msg->sd, tiraCmdIdToSz(audioPowerState));
+  sendMsg(msg->sd, SZ_VIDEO_AUX);
+  sendMsg(msg->sd, tiraCmdIdToSz(rearSpeakerState));
+  sendMsg(msg->sd, tiraCmdIdToSz(frontSpeakerState));
+  sendMsg(msg->sd, tiraCmdIdToSz(bSpeakerState));
+  sendMsg(msg->sd, tiraCmdIdToSz(MASTER_VOLUME));
+  sendMsg(msg->sd, tiraCmdIdToSz(CENTER_VOLUME));
+  sendMsg(msg->sd, tiraCmdIdToSz(SURROUND_VOLUME));
+  sendMsg(msg->sd, tiraCmdIdToSz(SUBWOOFER_VOLUME));
+  sendMsg(msg->sd, tiraCmdIdToSz(surroundProfile));
+  sendMsg(msg->sd, tiraCmdIdToSz(station));
+  sendMsg(msg->sd, tiraCmdIdToSz(audioSource));
+  sendMsg(msg->sd, tiraCmdIdToSz(muteState));
+}   
+
+
+// return the remote control command structure associated with the
+// given tira ir code string
+struct rcCmd * irRxCmdToRcCmd(char const * irCode) {
+
+   int i,j,k;
+   const char * tableCode;
+   
+   for (i=0; i<sizeof(rcCmd)/sizeof(struct rcCmd); i++) {
+      for(j=0; rcCmd[i].irRx && j<rcCmd[i].irRx->size; j++) {
+         tableCode = rcCmd[i].irRx->code[j];
+         
+         for (k=0;
+              k<rcCmd[i].irRx->matchLen &&
+              irCode[k]==tableCode[k]; k++);
+              
+         if (k==rcCmd[i].irRx->matchLen)
+            return &rcCmd[i];
+      }    
+   }
+   
+   return &rcCmd[UNDEFINED];
+}                
+
+
+// return TRUE if given irRx has irCode in its array of possible codes
+int irRxHasCode(struct irRx * irRx, char const * irCode) {
+
+   int j,k;
+   const char * tableCode;
+   
+   for(j=0; irRx && j<irRx->size; j++) {
+      tableCode = irRx->code[j];
+      
+      for (k=0;
+           k<irRx->matchLen &&
+           irCode[k]==tableCode[k]; k++);
+           
+      if (k==irRx->matchLen)
+         return TRUE;
+   }    
+   
+   return FALSE;
+}                
 
 
 // return the rcCmd id associated to a command string
@@ -1273,7 +1396,7 @@ void sendVirtualKeyCode(unsigned vkPress) {
 }
 
 
-// indexed to the current foreground window and return the shortcut keycode
+// use the current foreground window as an index to return the shortcut keycode
 int getVirtualKeyCode(struct rcCmd * cmd) {
    int winID = getForegroundWindowAppID();
    
@@ -1325,7 +1448,7 @@ int tiraTransmit(int cmd) {
 
    int result=0;
    
-   printf("Transmitting IR command: %s\n", tiraCmdIdToSz(cmd));
+   printf("Transmitting IR command %s: %s\n", szTime(), tiraCmdIdToSz(cmd));
    
    struct tiraCmd * tiraCmd = tiraCmdIdToTiraCmd(cmd);
    
@@ -1359,7 +1482,8 @@ const char * vkCodeToSz(unsigned vkCode) {
 }   
 
 
-// return the ir remote mode to provide context aware functionality
+// translate the current display mode to the corresponding remote mode enum 
+// used as an index to provide a context aware itach wifi to ir command
 // This function simulates an ir remote's TV and DVD mode buttons 
 int getRemoteMode() {
    switch (displayMode) {
@@ -1373,11 +1497,26 @@ int getRemoteMode() {
 }   
 
 
-void help() {
-   printf( "\ntype \'q\' to quit\n");
+const char * remoteModeToSz(int mode) {
+   switch (mode) {
+      case TV_MODE:
+         return "tv mode";
+      case DVD_MODE:
+         return "dvd mode";
+      default:
+         return "undefined mode";
+   }
+}   
+
+
+void errMsgExit(char * msg) {
+   MessageBox(
+       NULL,
+       msg,
+       "Launch Video",
+       MB_ICONERROR | MB_OK
+   );
+   exit(1);
 }
-
-
-
 
 

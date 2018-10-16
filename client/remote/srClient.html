@@ -1,0 +1,49 @@
+<html>
+
+<head>
+   <title>Smart Remote</title>
+   <style>
+      button {
+         height: 240px;
+         width: 480px;
+         font-size: 100px;
+         background: lightgray;
+         color: lightgray;
+         text-shadow: 2px 2px 4px black;
+      }
+   </style>
+</head>
+
+<body>
+   <button id="power">Power</button>
+   <p style="font-size:40px" id="status"></p>
+   
+   <script>
+      var status=document.getElementById("status");
+      var power=document.getElementById("power");
+      
+      var script = document.createElement('script');
+      script.src = 'http://' + location.hostname + ':3000/socket.io';
+      script.addEventListener('load', initSocketIO);
+      document.head.appendChild(script);
+   
+      function initSocketIO() {      
+         var srServer=io();
+         srServer.on('notification', updateButtons);
+         power.onclick=function(){srServer.emit('request', 'power')};
+      }
+      
+      function updateButtons(msg) {
+         switch (msg) {
+            case 'power on':
+               power.style.color = 'blue';
+               break;
+            case 'power off':
+               power.style.color = 'lightgray';
+               break;
+         } 
+      } 
+   </script>
+</body>   
+
+</html>

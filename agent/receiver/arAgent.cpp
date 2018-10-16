@@ -27,18 +27,20 @@
  *                 to a desired DSP program for specific speaker
  *                 configurations 
  * 2016 Jul 17 jhm added smart remote functionality
+ * 2018 Sep 04 jhm replaced spinlocks with message queues for thread
+ *                 coordination and command serialization
  *
  * Notes:
- * Use build.bat to build an executable
- * Use demo/demo.exe to generate the IR code char arrays to put into a 
- *    header file
- * Use client/msg/msg.exe to send a TCP test message to this server
+ * Use build.bat to build console and daemon process executables
+ * Use util/tira/demo.exe to generate the IR code char arrays included
+ *    in the common/tira_tx.c file
+ * Use client/msg/msg.exe to send a TCP test message to this agent
  * Use client/receiver/arControl.java or client/surround/srControl.java
- *    as a GUI for sending TCP command messages to this server
+ *    as a GUI for sending TCP command messages to this agent
  *
  * The arAgent target is built to run as a detached windows background 
  * process during startup or as a service.  The MinGW compiler creates
- * the arAgent target that handles Windows messaging.
+ * an arAgent target that uses native Windows DLLs.
  * MinGW's philosophy differs from cygwin by using native windows library 
  * support whereas Cygwin strives to provide complete POSIX support.  
  * The arAgentConsole target created by the Cygwin compiler is used 
@@ -47,35 +49,23 @@
  
 #include <winsock2.h>
 #include <stdio.h>
-#include "../../common/tira.h"
-#include "../../common/xantech_codes.h"
-#include "../../common/yamaha_codes.h"
-#include "../../common/common.h"
-#include "../../common/extern.h"
-#include "../../common/socket.h"
+#include "common.h"
+#include "socket.h"
 #include "arAgent.h"
 
 int main(int argc, char ** argv) {
 
    int error, comPort;
    
-   comPort=processArgs(argc, argv);
-   
-   loadTiraDll();
-   printf("Tira library loaded\n");
-   tira_init();
-   
-   int port = comPort ? comPort : DEFAULT_COM_PORT;
-   printf("Tira activat%s on com port %d\n", 
-          (error=tira_start(port-1)) ? "ion failed" : "ed", port);
-   if (error) { usage(); exit(1); }
+   processArgs(argc, argv);
    
    HANDLE hThread = initExitHandler();
    initConsoleModeExitHandler();
    
+   initTiraRemoteControl();
    ampInit();
-   
-   initTcpServer(initWinsock(), MEDIA_CONTROL_PORT);
+   processClientMsgThreadStart();
+   initTcpServer(initWinsock(), AUDIO_CONTROL_PORT);
    
    isConsoleMode() ?
       ttyLoop() :
@@ -156,8 +146,51 @@ void ampInit() {
     printf("Initializing amplifier complete\n");
 }
 
+int initTiraRemoteControl() {
+   if (initTiraRemoteControl(DEFAULT_TIRA_COM_PORT))
+      exit(1);
+   return 0;   
+}      
+
+// thread for processing TCP/IP messages
+DWORD processClientMsgThread(LPVOID param) {
+   QueuedMsg * msg;
+   
+   while(!exiting) {
+      while( !(msg = msgQueueRemove()) ) {
+         printConsoleLogMsgs();   
+         Sleep(100);
+      }   
+         
+      printConsoleLogMsgs();   
+      irSend(msg);
+      delete msg;
+   }
+
+   isClientMsgThreadRunning=FALSE;
+   printq("processClientMsgThread exiting\n");
+   ExitThread(0);
+}   
+
+//// begin agent specific socket hooks
+void deregisterClient(struct socketDescriptor * sd) { 
+   msgQueueAdd(SZ_DEREGISTER, sd); 
+}
+void processServerConnect(const char * agent) {}
+void processServerMsg(const char * msg, struct socketDescriptor * sd) {}
+//// end agent specific socket hooks
+
 
 void irSend(const char * szCmd) {
+   QueuedMsg * msg = new QueuedMsg(szCmd);
+   irSend(msg); 
+   delete msg;
+}      
+
+
+void irSend(QueuedMsg * msg) {
+
+    const char * szCmd = msg->sz;
              
     int i, cmd;
     static int restoring=FALSE;
@@ -168,7 +201,7 @@ void irSend(const char * szCmd) {
     }
 
     if (!initializing)
-       printf("irSend: %s\n", szCmd);
+       printf("\nProcess msg: %s\n", szCmd);
     
     char volumeCmd = cmd>=VOLUME_RANGE_BEGIN && cmd<=VOLUME_RANGE_END;
     char dspCmd = cmd>=DSP_MODE_CMD_RANGE_BEGIN && cmd<=DSP_MODE_CMD_RANGE_END;
@@ -180,7 +213,7 @@ void irSend(const char * szCmd) {
         cmd!=REGISTER &&
         cmd!=DEREGISTER &&
         cmd!=REREGISTER &&
-        cmd!=EXIT) {
+        cmd!=EXIT_PROCESS) {
         printf("irSend: Ignoring %s request because amplifier power is off\n", szCmd);
         return;
     }
@@ -254,22 +287,22 @@ void irSend(const char * szCmd) {
             setSwitchMatrix(cmd);
             break;
         case REGISTER:
-            sendMsg(tiraCmdIdToSz(rearSpeakerState));
-            sendMsg(tiraCmdIdToSz(frontSpeakerState));
-            sendMsg(tiraCmdIdToSz(bSpeakerState));
-            sendMsg(tiraCmdIdToSz(MASTER_VOLUME));
-            sendMsg(tiraCmdIdToSz(CENTER_VOLUME));
-            sendMsg(tiraCmdIdToSz(SURROUND_VOLUME));
-            sendMsg(tiraCmdIdToSz(SUBWOOFER_VOLUME));
-            sendMsg(tiraCmdIdToSz(surroundProfile));
-            sendMsg(tiraCmdIdToSz(station));
-            sendMsg(tiraCmdIdToSz(audioSource));
-            sendMsg(tiraCmdIdToSz(muteState));
-            sendMsg(tiraCmdIdToSz(getDspEffectState()));
-            sendMsg(tiraCmdIdToSz(audioPowerState));
+            sendMsg(msg->sd, tiraCmdIdToSz(rearSpeakerState));
+            sendMsg(msg->sd, tiraCmdIdToSz(frontSpeakerState));
+            sendMsg(msg->sd, tiraCmdIdToSz(bSpeakerState));
+            sendMsg(msg->sd, tiraCmdIdToSz(MASTER_VOLUME));
+            sendMsg(msg->sd, tiraCmdIdToSz(CENTER_VOLUME));
+            sendMsg(msg->sd, tiraCmdIdToSz(SURROUND_VOLUME));
+            sendMsg(msg->sd, tiraCmdIdToSz(SUBWOOFER_VOLUME));
+            sendMsg(msg->sd, tiraCmdIdToSz(surroundProfile));
+            sendMsg(msg->sd, tiraCmdIdToSz(station));
+            sendMsg(msg->sd, tiraCmdIdToSz(audioSource));
+            sendMsg(msg->sd, tiraCmdIdToSz(muteState));
+            sendMsg(msg->sd, tiraCmdIdToSz(getDspEffectState()));
+            sendMsg(msg->sd, tiraCmdIdToSz(audioPowerState));
         
             if (++registrationCount==1) {
-               sendMsg(SZ_FIRST_REGISTRATION);
+               sendMsg(msg->sd, SZ_FIRST_REGISTRATION);
                irSend(SZ_AUDIO_POWER_ON);
             }   
             break;
@@ -284,46 +317,51 @@ void irSend(const char * szCmd) {
             break;    
         case REREGISTER:
             if (++registrationCount==1) {
-                sendMsg(SZ_RESTORE_STATE);
+                sendMsg(msg->sd, SZ_RESTORE_STATE);
                 restoring=TRUE;
             }    
             else {
-                sendMsg(SZ_VIDEO_AUX);
-                sendMsg(SZ_DSP_EFFECT_ON);
-                sendMsg(tiraCmdIdToSz(rearSpeakerState));
-                sendMsg(tiraCmdIdToSz(frontSpeakerState));
-                sendMsg(tiraCmdIdToSz(bSpeakerState));
-                sendMsg(tiraCmdIdToSz(MASTER_VOLUME));
-                sendMsg(tiraCmdIdToSz(CENTER_VOLUME));
-                sendMsg(tiraCmdIdToSz(SURROUND_VOLUME));
-                sendMsg(tiraCmdIdToSz(SUBWOOFER_VOLUME));
-                sendMsg(tiraCmdIdToSz(station));
-                sendMsg(tiraCmdIdToSz(audioSource));
-                sendMsg(tiraCmdIdToSz(muteState));
-                sendMsg(tiraCmdIdToSz(getDspEffectState()));
-                sendMsg(tiraCmdIdToSz(audioPowerState));
+                sendMsg(msg->sd, SZ_VIDEO_AUX);
+                sendMsg(msg->sd, SZ_DSP_EFFECT_ON);
+                sendMsg(msg->sd, tiraCmdIdToSz(rearSpeakerState));
+                sendMsg(msg->sd, tiraCmdIdToSz(frontSpeakerState));
+                sendMsg(msg->sd, tiraCmdIdToSz(bSpeakerState));
+                sendMsg(msg->sd, tiraCmdIdToSz(MASTER_VOLUME));
+                sendMsg(msg->sd, tiraCmdIdToSz(CENTER_VOLUME));
+                sendMsg(msg->sd, tiraCmdIdToSz(SURROUND_VOLUME));
+                sendMsg(msg->sd, tiraCmdIdToSz(SUBWOOFER_VOLUME));
+                sendMsg(msg->sd, tiraCmdIdToSz(station));
+                sendMsg(msg->sd, tiraCmdIdToSz(audioSource));
+                sendMsg(msg->sd, tiraCmdIdToSz(muteState));
+                sendMsg(msg->sd, tiraCmdIdToSz(getDspEffectState()));
+                sendMsg(msg->sd, tiraCmdIdToSz(audioPowerState));
             }    
             break;
-        case EXIT:
-            shutdownServer();
-            Sleep(2000);  // wait for client threads to deregister
-            if (audioPowerState==AUDIO_POWER_ON) 
-                tiraTransmit(AUDIO_POWER_OFF);
+        case EXIT_PROCESS:
+            if (exiting) {
+               printf("\nExit previously requested, forcing exit\n");
+               exit(0);
+            }
+            
             printf("Exiting...\n");
-            stty_buffered();
+            exiting=TRUE;
+        
+            shutdownServer();
+            
+            if (audioPowerState==AUDIO_POWER_ON) 
+               tiraTransmit(AUDIO_POWER_OFF);
+                
+            while(areSocketThreadsRunning())
+               Sleep(500); 
+               
             WSACleanup();
             unloadTiraDll();
-            FreeLibrary(handle);
+            printf("Exit complete\n");
          
-            if (ttyExit) {
-               ttyExit=FALSE;
-               DWORD count;
-               WriteConsoleInput(GetStdHandle(STD_INPUT_HANDLE), 
-                  inputQ, sizeof(inputQ)/sizeof(INPUT_RECORD), &count);
-            } 
-         
-            if (!isConsoleMode()) exit(0);
-         
+            if (isConsoleMode())
+               tty_buffering(TRUE);
+               
+            exit(0);
             break;
         case MUTE_ON:
         case MUTE_OFF:
@@ -360,15 +398,6 @@ void irSend(const char * szCmd) {
         printf("Processed a %s request. Count %d\n", tiraCmdIdToSz(cmd), registrationCount);
     }    
 }         
-
-
-void processAgentNotification(const char * server, char * msg) {}
-void processClientCmd(const char * msg) { 
-    printf("processClientCmd: %s\n", msg);
-    irSend(msg); 
-}
-void processServerConnect(const char * agent) {}
-void processClientDisconnect() { irSend(SZ_DEREGISTER); }
 
 
 void setSwitchMatrix(int cmd) {
@@ -551,7 +580,7 @@ int tiraTransmit(int cmd) {
    char menuCmd = cmd>=MENU_RANGE_BEGIN && cmd<=MENU_RANGE_END;
 
    if (!volumeCmd && !menuCmd) {
-      printf("Transmitting IR command: %s\n", tiraCmdIdToSz(cmd));
+       printf("Transmitting IR command: %s\n", tiraCmdIdToSz(cmd));
    }
    
    struct tiraCmd * tiraCmd = tiraCmdIdToTiraCmd(cmd);
@@ -559,7 +588,8 @@ int tiraTransmit(int cmd) {
    if (tiraCmd->codes) {
    
       if (!debug) {
-         delay(cmd);
+         if (!(cmd==AUDIO_POWER_ON && audioPowerState==AUDIO_POWER_OFF))  
+            delay(cmd);
          result = tiraTransmit(tiraCmd);
          delay(cmd);
       }   
@@ -791,16 +821,17 @@ void setVolume(const char * volCmd) {
 }
 
 
+// delay before and after sending IR commands aids distinction and reliable delivery
 void delay(int cmd) {
     
    if (cmd>=DSP_MODE_CMD_RANGE_BEGIN && cmd<=DSP_MODE_CMD_RANGE_END)
        Sleep(DSP_CMD_DELAY);
    
    if (cmd>=XANTECH_CMD_RANGE_BEGIN && cmd<=XANTECH_CMD_RANGE_END)
-       Sleep(XANTECH_DELAY);    // required for command distinction
+       Sleep(XANTECH_DELAY);
        
-   if (cmd==AUDIO_POWER_ON && audioPowerState==AUDIO_POWER_OFF ||  // allow amplifier time to power up before sending commands
-       cmd==AUDIO_POWER_OFF && audioPowerState==AUDIO_POWER_ON) {  // and finish processing commands before powering down
+   if (cmd==AUDIO_POWER_ON && audioPowerState==AUDIO_POWER_OFF) {  
+       // allow amplifier and xantech switch matrix time to power up before sending commands
        Sleep(AUDIO_POWER_ON_OFF_DELAY);   
    }    
 }           
@@ -859,7 +890,7 @@ void setInputSourceDspEffect() {
 }
 
 
-void printIrCmd(struct irCmd * irCmd) {
+void printTiraCmd(struct tiraCmd * irCmd) {
     int i;
     printf("id: %d\n", irCmd->id);
     printf("sz: %s\n", irCmd->sz);
@@ -874,7 +905,7 @@ void printIrCmd(struct irCmd * irCmd) {
 }    
 
 
-void help() {
-   printf( "\ntype \'q\' to quit\n");
-}
+
+
+
 

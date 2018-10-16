@@ -1,32 +1,27 @@
-// This is a simple utility that transmits TCP messages
-// to the acServer.exe daemon.
+// Transmit a TCP message to a media control server agent
 //
-// Usage: msg.exe ServerName <msg> 
+// Usage: msg.exe ServerName <port> <msg> 
 //
 // 2016 Apr 7 jhm original creation
 //
 
-#include <winsock2.h>
-#include <stdio.h>
-#include "../../common/socket.h"
+#include "socket.h"
 
 int main(int argc, char **argv) {
 
-   SOCKET socket;
-   struct socketDescriptor sd;
+   struct socketDescriptor sd = DEFAULT_SOCKET_DESCRIPTOR;
    
    if (argc != 4) {
       printf("\nUsage: msg.exe ServerName <port> <msg>\n");
       return 1;
    }
    
-   ZeroMemory(&sd, sizeof(sd));
-   sd.host = argv[1];  sd.port=atoi(argv[2]); sd.socket=&socket;
+   sd.host = argv[1]; sd.port=atoi(argv[2]);
 
    initWinsock();
    
    if (establishConnection(&sd)) { 
-      sendMsg(&sd, argv[3]);
+      sendMsg(argv[3]);
       shutdownConnection(&sd);
    }   
    WSACleanup();

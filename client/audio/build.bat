@@ -5,6 +5,6 @@ if "%1" == "-all" (
    set BIN=%PROGRAM_DRIVE%\pkg\win32\mingw\bin
    %BIN%\gcc -g -static -mwindows -o setForegroundWindow setForegroundWindow.c
 )   
-javac acclient.java
-jar cvmf manifest AcClient.jar *.class
+javac.exe acclient.java
+jar.exe cvmf manifest AcClient.jar *.class
 del *.class >nul

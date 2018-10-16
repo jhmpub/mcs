@@ -1,319 +1,97 @@
-#include "itach_codes.h"
-#include "tira_codes.h"
+#include "itach.h"
+#include "tira_rx.h"
+#include "shortcuts.h"
 
-#define MAIN_MODULE "rcAgent"      
-#define VIDEO_POWER_ON_DELAY 8000   // milliseconds
+// direct zrcc.h to not compile this module as a controller or a target
+#define HOST_CMN TRUE  
+#include "zrcc.h"
+
+#define VIDEO_POWER_ON_DELAY 4000   // milliseconds
 #define SZ_VIDEO_DEFAULT_MASTER_VOLUME "44"
-#define MODE_MENU MODE
+#define VIDEO_INPUT_MENU MODE
 
 #define  OFF 0
 #define  ON  1        
 
-////
-//// shortcut keys to synthesize keyboard input
-////
-
-// chapter and large jumps are handled by processClientCmd cases for 
-// "arrow left large" and "arrow right large" 
-// 9 Shift-left or Shift-right arrows for NETFLIX
-// Shift-N or Shift-P for VLC
-// 3 Ctrl-F, 13 Ctrl-B for WMC
-// 12 left or right arrows for YOUTUBE
-#define  KBD_SHIFT_N           0x4E10   // Menu -> VLC next chapter 
-#define  KBD_SHIFT_P           0x5010   // Menu <- VLC previous chapter
-                                        // 
-#define  KBD_CTRL_B            0x4211   // << -> WMC 7 seconds back
-#define  KBD_LEFT_ARROW        0x0025   // << -> YOUTUBE 5 seconds back
-#define  KBD_LEFT_ARROW_CTRL   0x2511   // << -> VLC 60 seconds back
-#define  KBD_LEFT_ARROW_SHIFT  0x2510   // << -> NETFLIX 10 seconds back
-                                        // 
-#define  KBD_CTRL_F            0x4611   // >> -> WMC 30 seconds forward         
-#define  KBD_RIGHT_ARROW       0x0027   // >> -> YOUTUBE 5 seconds forward
-#define  KBD_RIGHT_ARROW_SHIFT 0x2710   // << -> NETFLIX 10 seconds forward
-#define  KBD_RIGHT_ARROW_CTRL  0x2711   // >> -> VLC 60 seconds forward
-                                        // 
-#define  KBD_CTRL_P            0x5011   // > or " WMC play/pause
-#define  KBD_SPACE             0x0020   // > or " NETFLIX, VLC, YOUTUBE play/pause
-                                        // 
-#define  KBD_ALT_TAB           0x0912   // VCR Menu -> Alt-Tab
-#define  KBD_ARROW_DOWN        0x0028   // Down Menu Arrow -> Down Keyboard Arrow
-#define  KBD_ARROW_UP          0x0026   // Up Menu Arrow -> Up Keyboard Arrow
-#define  KBD_ENTER             0x000D   // > -> Enter
-#define  KBD_ALT_F4            0x7312   // Stop -> Alt-F4 
-#define  KBD_N0                0x0030   // 0 -> YOUTUBE  0%
-#define  KBD_N1                0x0031   // 1 -> YOUTUBE 10%
-#define  KBD_N2                0x0032   // 2 -> YOUTUBE 20%
-#define  KBD_N3                0x0033   // 3 -> YOUTUBE 30%
-#define  KBD_N4                0x0034   // 4 -> YOUTUBE 40%
-#define  KBD_N5                0x0035   // 5 -> YOUTUBE 50%
-#define  KBD_N6                0x0036   // 6 -> YOUTUBE 60%
-#define  KBD_N7                0x0037   // 7 -> YOUTUBE 70%
-#define  KBD_N8                0x0038   // 8 -> YOUTUBE 80%
-#define  KBD_N9                0x0039   // 9 -> YOUTUBE 90%
-#define  KBD_CTRL_R            0x5211   // prepends remote Up, Down, VCR Menu, TV PIP -> Ctrl-R
-
-#define  SZ_KBD_SHIFT_N             "shift n "
-#define  SZ_KBD_SHIFT_P             "shift p"
-                                    
-#define  SZ_KBD_CTRL_B              "ctrl b"
-#define  SZ_KBD_LEFT_ARROW          "left arrow"
-#define  SZ_KBD_LEFT_ARROW_CTRL     "ctrl left arrow"
-#define  SZ_KBD_LEFT_ARROW_SHIFT    "shift left arrow"
-                               
-#define  SZ_KBD_CTRL_F              "ctrl f"
-#define  SZ_KBD_RIGHT_ARROW         "right arrow"
-#define  SZ_KBD_RIGHT_ARROW_SHIFT   "ctrl right arrow"
-#define  SZ_KBD_RIGHT_ARROW_CTRL    "shift right arrow"
-                               
-#define  SZ_KBD_CTRL_P              "ctrl p"
-#define  SZ_KBD_SPACE               "space"
-                               
-#define  SZ_KBD_ALT_TAB             "alt tab"
-#define  SZ_KBD_ARROW_DOWN          "arrow down"
-#define  SZ_KBD_ARROW_UP            "arrow up"
-#define  SZ_KBD_ENTER               "enter"
-#define  SZ_KBD_ALT_F4              "alt f4"
-#define  SZ_KBD_N0                  "N0"
-#define  SZ_KBD_N1                  "N1"
-#define  SZ_KBD_N2                  "N2"
-#define  SZ_KBD_N3                  "N3"
-#define  SZ_KBD_N4                  "N4"
-#define  SZ_KBD_N5                  "N5"
-#define  SZ_KBD_N6                  "N6"
-#define  SZ_KBD_N7                  "N7"
-#define  SZ_KBD_N8                  "N8"
-#define  SZ_KBD_N9                  "N9"
-#define  SZ_KBD_CTRL_R              "ctrl r"
-
-enum appID {
-   NETFLIX,
-   VLC,
-   WMC,
-   YOUTUBE,  // nb click once on a running video to pause and set hotkey focus
-   APP_SIZE,
-   APP_UNKNOWN
-};
-
-struct appTitle {
-    const char * sz;
-    int id;
-} appTitle[] = {    
-   { "Netflix - ", NETFLIX },
-   { "Microsoft Silverlight", NETFLIX },
-   { "VLC media player", VLC },
-   { "Windows Media Center", WMC },
-   { "YouTube - ", YOUTUBE }
-}; 
-
-struct shortcut {
-   unsigned vkCode[APP_SIZE];    // indexed by appID enum
-   const char * sz[APP_SIZE];    // debug description
-};   
-
-static struct shortcut scLgJumpBackward = { 
-   {
-      KBD_LEFT_ARROW_SHIFT,
-      KBD_SHIFT_P,
-      KBD_CTRL_B,
-      KBD_LEFT_ARROW
-   },
-   {
-      SZ_KBD_LEFT_ARROW_SHIFT,
-      SZ_KBD_SHIFT_P,
-      SZ_KBD_CTRL_B,
-      SZ_KBD_LEFT_ARROW
-   }   
-};  
-
-static struct shortcut scLgJumpForward = { 
-   {
-      KBD_RIGHT_ARROW_SHIFT,
-      KBD_SHIFT_N,
-      KBD_CTRL_F,
-      KBD_RIGHT_ARROW
-   },
-   {
-      SZ_KBD_RIGHT_ARROW_SHIFT,
-      SZ_KBD_SHIFT_N,
-      SZ_KBD_CTRL_F,
-      SZ_KBD_RIGHT_ARROW
-   }   
-};
-
-static struct shortcut scSmJumpBackward = { 
-   {
-      KBD_LEFT_ARROW_SHIFT,
-      KBD_LEFT_ARROW_CTRL,
-      KBD_CTRL_B,
-      KBD_LEFT_ARROW
-   },
-   {
-      SZ_KBD_LEFT_ARROW_SHIFT,
-      SZ_KBD_LEFT_ARROW_CTRL,
-      SZ_KBD_CTRL_B,
-      SZ_KBD_LEFT_ARROW
-   }   
-};  
-
-static struct shortcut scSmJumpForward = { 
-   {
-      KBD_RIGHT_ARROW_SHIFT,
-      KBD_RIGHT_ARROW_CTRL,
-      KBD_CTRL_F,
-      KBD_RIGHT_ARROW
-   },
-   {
-      SZ_KBD_RIGHT_ARROW_SHIFT,
-      SZ_KBD_RIGHT_ARROW_CTRL,
-      SZ_KBD_CTRL_F,
-      SZ_KBD_RIGHT_ARROW
-   }   
-};
-
-static struct shortcut scPlayPause = {
-   {
-      KBD_SPACE,
-      KBD_SPACE,
-      KBD_CTRL_P,
-      KBD_SPACE
-   },
-   {
-      SZ_KBD_SPACE,
-      SZ_KBD_SPACE,
-      SZ_KBD_CTRL_P,
-      SZ_KBD_SPACE
-   }   
-};
-
-static struct shortcut scAltTab = {
-   {KBD_ALT_TAB}, {SZ_KBD_ALT_TAB}
-};
-
-static struct shortcut scArrowUp = {
-   {KBD_ARROW_UP}, {SZ_KBD_ARROW_UP}
-};
-
-static struct shortcut scArrowDown = {
-   {KBD_ARROW_DOWN}, {SZ_KBD_ARROW_DOWN}
-};
-
-static struct shortcut scEnter = {
-   {KBD_ENTER}, {SZ_KBD_ENTER}
-};
-
-static struct shortcut scAltF4 = {
-   {KBD_ALT_F4}, {SZ_KBD_ALT_F4}
-};
-
-static struct shortcut scCtrlR = {
-   {KBD_CTRL_R}, {SZ_KBD_CTRL_R}
-};
-
-static struct shortcut scN0 = {
-   {KBD_N0}, {SZ_KBD_N0}
-};
-
-static struct shortcut scN1 = {
-   {KBD_N1}, {SZ_KBD_N1}
-};
-
-static struct shortcut scN2 = {
-   {KBD_N2}, {SZ_KBD_N2}
-};
-
-static struct shortcut scN3 = {
-   {KBD_N3}, {SZ_KBD_N3}
-};
-
-static struct shortcut scN4 = {
-   {KBD_N4}, {SZ_KBD_N4}
-};
-
-static struct shortcut scN5 = {
-   {KBD_N5}, {SZ_KBD_N5}
-};
-
-static struct shortcut scN6 = {
-   {KBD_N6}, {SZ_KBD_N6}
-};
-
-static struct shortcut scN7 = {
-   {KBD_N7}, {SZ_KBD_N7}
-};
-
-static struct shortcut scN8 = {
-   {KBD_N8}, {SZ_KBD_N8}
-};
-
-static struct shortcut scN9 = {
-   {KBD_N9}, {SZ_KBD_N9}
-};
-
+#define SZ_AR_FIRST_REGISTRATION   "audio receiver agent first registration"
+#define SZ_AR_MODE                 "audio receiver agent mode"
+#define SZ_FEEDBACK_TV_MENU        "feedback tv menu"
+#define SZ_FEEDBACK_TV_RETURN      "feedback tv return"
 
 //// rcCmd struct translates ir and tcp input messages to output synthesized 
-//// keyboard shortcuts and/or itach wifi to ir commands 
+//// keyboard shortcuts, itach wifi to ir, and zigbee remote control commands.  
+//// Translation ouptut is context dependent based on the active application;
+//// e.g. live TV, DVD, Windows Media Center recording, Netflix, YouTube, etc.
 static struct rcCmd {
-   int id;                            // rcCmdID enum
-   const char * sz;                   // tcp command string and description
-   struct irRx * irRx;                // ir input
-   struct shortcut * shortcut;        // dvr synthesized keyboard output
-   struct irTx * irTx;                // wifi to tv or dvd ir output
+   int id;                        // cmdID enum
+   const char * sz;               // ip command string input
+   struct irRx * irRx;            // ir input
+   struct shortcut * shortcut;    // synthesized keyboard shortcut output
+   struct irTx * irTx;            // wifi to ir output
+   struct cercCmd * zrc;          // zigbee remote control output
 } rcCmd[] = { 
 
    {
       UNDEFINED,
       SZ_UNDEFINED,
-      &irRxUndefined,
+      &irRxCmd[TIRA_UNDEFINED].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    }, 
-   
+
    {
       ARROW_DOWN,
       SZ_ARROW_DOWN,
-      &irRxVcrMenuDown,
-      &scArrowDown,
-      irTxMenuDown
+      &irRxCmd[TIRA_VCR_MENU_DOWN].key,
+      &virtualKey[SC_ARROW_DOWN].shortcut,
+      irTxCmd[ITACH_MENU_DOWN].remote,
+      &cercCmd[ZRC_DOWN],
    },
    
    {
       ARROW_LEFT,
       SZ_ARROW_LEFT,
-      &irRxVcrMenuLeft,
-      &scLgJumpBackward,
-      irTxMenuLeft,
+      &irRxCmd[TIRA_VCR_MENU_LEFT].key,
+      &virtualKey[SC_LARGE_JUMP_BACKWARD].shortcut,
+      irTxCmd[ITACH_MENU_LEFT].remote,
+      &cercCmd[ZRC_LEFT],
    },
    
    {
       ARROW_RIGHT,
       SZ_ARROW_RIGHT,
-      &irRxVcrMenuRight,
-      &scLgJumpForward,
-      irTxMenuRight,
+      &irRxCmd[TIRA_VCR_MENU_RIGHT].key,
+      &virtualKey[SC_LARGE_JUMP_FORWARD].shortcut,
+      irTxCmd[ITACH_MENU_RIGHT].remote,
+      &cercCmd[ZRC_RIGHT],
    },
     
    {
       ARROW_UP,
       SZ_ARROW_UP,
-      &irRxVcrMenuUp,
-      &scArrowUp,
-      irTxMenuUp
+      &irRxCmd[TIRA_VCR_MENU_UP].key,
+      &virtualKey[SC_ARROW_UP].shortcut,
+      irTxCmd[ITACH_MENU_UP].remote,
+      &cercCmd[ZRC_UP],
    },
    
    {
       CHANNEL_DOWN,
       SZ_CHANNEL_DOWN,
-      &irRxVcrChannelDown,
+      &irRxCmd[TIRA_VCR_CHANNEL_DOWN].key,
       NULL,
-      irTxChannelDown
+      irTxCmd[ITACH_CHANNEL_DOWN].remote,
+      &cercCmd[ZRC_CHANNEL_DOWN],
    },
    
    {
       CHANNEL_UP,
       SZ_CHANNEL_UP,
-      &irRxVcrChannelUp,
+      &irRxCmd[TIRA_VCR_CHANNEL_UP].key,
       NULL,
-      irTxChannelUp
+      irTxCmd[ITACH_CHANNEL_UP].remote,
+      &cercCmd[ZRC_CHANNEL_UP],
    },
    
    {
@@ -321,7 +99,8 @@ static struct rcCmd {
       SZ_DVD,
       NULL,
       NULL,
-      irTxN2
+      irTxCmd[ITACH_N2].remote,
+      NULL,
    },
    
    {
@@ -329,39 +108,35 @@ static struct rcCmd {
       SZ_DVR,
       NULL,
       NULL,
-      irTxN4
+      irTxCmd[ITACH_N4].remote,
+      NULL,
    },
     
    {
       EJECT,
       SZ_EJECT,
-      &irRxDvdEject,
       NULL,
-      irTxEject
+      NULL,
+      irTxCmd[ITACH_EJECT].remote,
+      NULL,
    },
    
-   {
-      EXIT,
-      SZ_EXIT,
-      NULL,
-      NULL,
-      NULL
-   },
-    
    {
       EXIT_APPLICATION,
       SZ_EXIT_APPLICATION,
       NULL,
-      &scAltF4,
-      NULL
+      &virtualKey[SC_ALT_F4].shortcut,
+      NULL,
+      NULL,
    },
    
    {
       FAST_FORWARD,
       SZ_FAST_FORWARD,
-      &irRxVcrFastForward,
-      &scSmJumpForward,
-      irTxFastForward
+      &irRxCmd[TIRA_VCR_FAST_FORWARD].key,
+      &virtualKey[SC_SMALL_JUMP_FORWARD].shortcut,
+      irTxCmd[ITACH_FAST_FORWARD].remote,
+      &cercCmd[ZRC_FAST_FORWARD],
    },
    
    {
@@ -369,7 +144,8 @@ static struct rcCmd {
       SZ_GET_STATE,
       NULL,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
     
    {
@@ -377,103 +153,116 @@ static struct rcCmd {
       SZ_LAUNCH_EXPLORER,
       NULL,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       REFRESH_EXPLORER,
       SZ_REFRESH_EXPLORER,
       NULL,
-      &scCtrlR,
-      NULL
+      &virtualKey[SC_CTRL_R].shortcut,
+      NULL,
+      NULL,
    },
     
    {
       MENU,
       SZ_MENU,
-      &irRxVcrMenu,
+      &irRxCmd[TIRA_VCR_MENU].key,
       NULL,
-      irTxMenu
+      irTxCmd[ITACH_MENU].remote,
+      &cercCmd[ZRC_GUIDE],
    },
     
    {
       N0,
-      SZ_N0,
-      &irRxVcrN0,
-      &scN0,
-      irTxN0
+      SZ_0,
+      &irRxCmd[TIRA_VCR_N0].key,
+      &virtualKey[SC_N0].shortcut,
+      irTxCmd[ITACH_N0].remote,
+      &cercCmd[ZRC_ZERO],
    },
     
    {
       N1,
-      SZ_N1,
-      &irRxVcrN1,
-      &scN1,
-      irTxN1
+      SZ_1,
+      &irRxCmd[TIRA_VCR_N1].key,
+      &virtualKey[SC_N1].shortcut,
+      irTxCmd[ITACH_N1].remote,
+      &cercCmd[ZRC_ONE],
    },
     
    {
       N2,
-      SZ_N2,
-      &irRxVcrN2,
-      &scN2,
-      irTxN2
+      SZ_2,
+      &irRxCmd[TIRA_VCR_N2].key,
+      &virtualKey[SC_N2].shortcut,
+      irTxCmd[ITACH_N2].remote,
+      &cercCmd[ZRC_TWO],
    },
     
    {
       N3,
-      SZ_N3,
-      &irRxVcrN3,
-      &scN3,
-      irTxN3
+      SZ_3,
+      &irRxCmd[TIRA_VCR_N3].key,
+      &virtualKey[SC_N3].shortcut,
+      irTxCmd[ITACH_N3].remote,
+      &cercCmd[ZRC_THREE],
    },
     
    {
       N4,
-      SZ_N4,
-      &irRxVcrN4,
-      &scN4,
-      irTxN4
+      SZ_4,
+      &irRxCmd[TIRA_VCR_N4].key,
+      &virtualKey[SC_N4].shortcut,
+      irTxCmd[ITACH_N4].remote,
+      &cercCmd[ZRC_FOUR],
    },
     
    {
       N5,
-      SZ_N5,
-      &irRxVcrN5,
-      &scN5,
-      irTxN5
+      SZ_5,
+      &irRxCmd[TIRA_VCR_N5].key,
+      &virtualKey[SC_N5].shortcut,
+      irTxCmd[ITACH_N5].remote,
+      &cercCmd[ZRC_FIVE],
    },
     
    {
       N6,
-      SZ_N6,
-      &irRxVcrN6,
-      &scN6,
-      irTxN6
+      SZ_6,
+      &irRxCmd[TIRA_VCR_N6].key,
+      &virtualKey[SC_N6].shortcut,
+      irTxCmd[ITACH_N6].remote,
+      &cercCmd[ZRC_SIX],
    },
     
    {
       N7,
-      SZ_N7,
-      &irRxVcrN7,
-      &scN7,
-      irTxN7
+      SZ_7,
+      &irRxCmd[TIRA_VCR_N7].key,
+      &virtualKey[SC_N7].shortcut,
+      irTxCmd[ITACH_N7].remote,
+      &cercCmd[ZRC_SEVEN],
    },
     
    {
       N8,
-      SZ_N8,
-      &irRxVcrN8,
-      &scN8,
-      irTxN8
+      SZ_8,
+      &irRxCmd[TIRA_VCR_N8].key,
+      &virtualKey[SC_N8].shortcut,
+      irTxCmd[ITACH_N8].remote,
+      &cercCmd[ZRC_EIGHT],
    },
     
    {
       N9,
-      SZ_N9,
-      &irRxVcrN9,
-      &scN9,
-      irTxN9
+      SZ_9,
+      &irRxCmd[TIRA_VCR_N9].key,
+      &virtualKey[SC_N9].shortcut,
+      irTxCmd[ITACH_N9].remote,
+      &cercCmd[ZRC_NINE],
    },
     
    {
@@ -481,39 +270,44 @@ static struct rcCmd {
       SZ_NEXT_WINDOW,
       NULL,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
     
    {
       OK,
       SZ_OK,
-      &irRxVcrOk,
-      &scEnter,
-      irTxOk
+      &irRxCmd[TIRA_VCR_OK].key,
+      &virtualKey[SC_ENTER].shortcut,
+      irTxCmd[ITACH_OK].remote,
+      &cercCmd[ZRC_OK],
    },
     
    {
       PAUSE,
       SZ_PAUSE,
-      &irRxVcrPause,
-      &scPlayPause,
-      irTxPause
+      &irRxCmd[TIRA_VCR_PAUSE].key,
+      &virtualKey[SC_PLAY_PAUSE].shortcut,
+      irTxCmd[ITACH_PAUSE].remote,
+      &cercCmd[ZRC_PAUSE],
    },
     
    {
       PLAY,
       SZ_PLAY,
-      &irRxVcrPlay,
-      &scPlayPause,
-      irTxPlay
+      &irRxCmd[TIRA_VCR_PLAY].key,
+      &virtualKey[SC_PLAY_PAUSE].shortcut,
+      irTxCmd[ITACH_PLAY].remote,
+      &cercCmd[ZRC_PLAY],
    },
    
    {
       VIDEO_POWER,
       SZ_VIDEO_POWER,
-      &irRxVcrPower,
+      &irRxCmd[TIRA_VCR_POWER].key,
       NULL,
-      irTxPower
+      irTxCmd[ITACH_POWER].remote,
+      NULL,
    },
    
    {
@@ -521,7 +315,8 @@ static struct rcCmd {
       SZ_RESTORE_STATE,
       NULL,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
@@ -529,23 +324,26 @@ static struct rcCmd {
       SZ_RETURN,
       NULL,
       NULL,
-      irTxReturn
+      irTxCmd[ITACH_RETURN].remote,
+      NULL,
    },
    
    {
       REWIND,
       SZ_REWIND,
-      &irRxVcrRewind,
-      &scSmJumpBackward,
-      irTxRewind
+      &irRxCmd[TIRA_VCR_REWIND].key,
+      &virtualKey[SC_SMALL_JUMP_BACKWARD].shortcut,
+      irTxCmd[ITACH_REWIND].remote,
+      &cercCmd[ZRC_REWIND],
    },
    
    {
       STOP,
       SZ_STOP,
-      &irRxVcrStop,
-      &scAltF4,
-      irTxStop
+      &irRxCmd[TIRA_VCR_STOP].key,
+      &virtualKey[SC_ALT_F4].shortcut,
+      irTxCmd[ITACH_STOP].remote,
+      &cercCmd[ZRC_EXIT_PAGE],
    },
    
    {
@@ -553,7 +351,8 @@ static struct rcCmd {
       SZ_TV,
       NULL,
       NULL,
-      irTxN4
+      irTxCmd[ITACH_N4].remote,
+      NULL,
    },
     
    {
@@ -561,7 +360,8 @@ static struct rcCmd {
       SZ_STATUS,
       NULL,
       NULL,
-      irTxDisplay
+      irTxCmd[ITACH_DISPLAY].remote,
+      NULL,
    },
    
    {
@@ -569,473 +369,681 @@ static struct rcCmd {
       SZ_SURROUND,
       NULL,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       MUTE,
       SZ_MUTE,
-      &irRxMute,
+      &irRxCmd[TIRA_MUTE].key,
+      NULL,
       NULL,
       NULL,
    },
     
    {
-      MODE,
+      VIDEO_INPUT_MENU,
       SZ_MODE,
-      &irRxVcrVideo,
+      &irRxCmd[TIRA_VCR_VIDEO].key,
       NULL,
-      irTxVideo
+      irTxCmd[ITACH_VIDEO].remote,
+      NULL,
    },
     
    {
       VOLUME_DOWN,
       SZ_VOLUME_DOWN,
-      &irRxVolumeDown,
+      &irRxCmd[TIRA_VOLUME_DOWN].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       VOLUME_UP,
       SZ_VOLUME_UP,
-      &irRxVolumeUp,
+      &irRxCmd[TIRA_VOLUME_UP].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
+   },
+   
+// begin existing equipment and itach notifications   
+   
+   {
+      IR_IGNORE,
+      SZ_IR_IGNORE,
+      &irRxCmd[TIRA_DVD_CHAPTER_BACK].key,
+      NULL,
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdDisplay,
+      &irRxCmd[TIRA_DVD_CHAPTER_NEXT].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdFastForward,
+      &irRxCmd[TIRA_DVD_DISPLAY].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdMenu,
+      &irRxCmd[TIRA_DVD_EJECT].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdMenuDown,
+      &irRxCmd[TIRA_DVD_FAST_FORWARD].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdMenuLeft,
+      &irRxCmd[TIRA_DVD_MENU].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdMenuRight,
+      &irRxCmd[TIRA_DVD_MENU_DOWN].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdMenuUp,
+      &irRxCmd[TIRA_DVD_MENU_LEFT].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN0,
+      &irRxCmd[TIRA_DVD_MENU_RIGHT].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN1,
+      &irRxCmd[TIRA_DVD_MENU_UP].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
+   },
+   
+   {
+      IR_IGNORE,
+      SZ_IR_IGNORE,
+      &irRxCmd[TIRA_DVD_N0].key,
+      NULL,
+      NULL,
+      NULL,
+   },
+   
+   {
+      IR_IGNORE,
+      SZ_IR_IGNORE,
+      &irRxCmd[TIRA_DVD_N1].key,
+      NULL,
+      NULL,
+      NULL,
    },
 
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN2,
+      &irRxCmd[TIRA_DVD_N2].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN3,
+      &irRxCmd[TIRA_DVD_N3].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
 
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN4,
+      &irRxCmd[TIRA_DVD_N4].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN5,
+      &irRxCmd[TIRA_DVD_N5].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN6,
+      &irRxCmd[TIRA_DVD_N6].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN7,
+      &irRxCmd[TIRA_DVD_N7].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN8,
+      &irRxCmd[TIRA_DVD_N8].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdN9,
+      &irRxCmd[TIRA_DVD_N9].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
 
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdOk,
+      &irRxCmd[TIRA_DVD_OK].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdPause,
+      &irRxCmd[TIRA_DVD_PAUSE].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdPlay,
+      &irRxCmd[TIRA_DVD_PLAY].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdPower,
+      &irRxCmd[TIRA_DVD_POWER].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdRewind,
+      &irRxCmd[TIRA_DVD_REWIND].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxDvdStop,
+      &irRxCmd[TIRA_DVD_STOP].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxHdmiSourceInput1,
+      &irRxCmd[TIRA_HDMI_SOURCE_INPUT1].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxHdmiSourceInput2,
+      &irRxCmd[TIRA_HDMI_SOURCE_INPUT2].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxHdmiSourceInput3,
+      &irRxCmd[TIRA_HDMI_SOURCE_INPUT3].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxHdmiSourceToggle,
+      &irRxCmd[TIRA_HDMI_SOURCE_TOGGLE].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvChannelDown,
+      &irRxCmd[TIRA_TV_CHANNEL_DOWN].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvChannelUp,
+      &irRxCmd[TIRA_TV_CHANNEL_UP].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvDisplay,
+      &irRxCmd[TIRA_TV_DISPLAY].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvFastForward,
+      &irRxCmd[TIRA_TV_FAST_FORWARD].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvMenu,
+      &irRxCmd[TIRA_TV_MENU].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvMenuDown,
+      &irRxCmd[TIRA_TV_MENU_DOWN].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvMenuLeft,
+      &irRxCmd[TIRA_TV_MENU_LEFT].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvMenuRight,
+      &irRxCmd[TIRA_TV_MENU_RIGHT].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvMenuUp,
+      &irRxCmd[TIRA_TV_MENU_UP].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN0,
+      &irRxCmd[TIRA_TV_N0].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN1,
+      &irRxCmd[TIRA_TV_N1].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
 
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN2,
+      &irRxCmd[TIRA_TV_N2].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN3,
+      &irRxCmd[TIRA_TV_N3].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
 
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN4,
+      &irRxCmd[TIRA_TV_N4].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN5,
+      &irRxCmd[TIRA_TV_N5].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN6,
+      &irRxCmd[TIRA_TV_N6].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN7,
+      &irRxCmd[TIRA_TV_N7].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN8,
+      &irRxCmd[TIRA_TV_N8].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvN9,
+      &irRxCmd[TIRA_TV_N9].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
 
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvPause,
+      &irRxCmd[TIRA_TV_PAUSE].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvPip,
+      &irRxCmd[TIRA_TV_PIP].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvPlay,
+      &irRxCmd[TIRA_TV_PLAY].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvPower,
+      &irRxCmd[TIRA_TV_POWER].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvReturn,
+      &irRxCmd[TIRA_TV_RETURN].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvRewind,
+      &irRxCmd[TIRA_TV_REWIND].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvStop,
+      &irRxCmd[TIRA_TV_STOP].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxTvVideo,
+      &irRxCmd[TIRA_TV_VIDEO].key,
       NULL,
-      NULL
+      NULL,
+      NULL,
    },
    
+   {
+      INFO,
+      SZ_DISPLAY_INFO,
+      NULL,
+      NULL,
+      NULL,
+      &cercCmd[ZRC_DISPLAY_INFO],
+   },
+   
+   {
+      EXIT_PAGE,
+      SZ_EXIT_PAGE,
+      NULL,
+      NULL,
+      NULL,
+      &cercCmd[ZRC_EXIT_PAGE],
+   },
+   
+   {
+      GUIDE,
+      SZ_GUIDE,
+      NULL,
+      NULL,
+      NULL,
+      &cercCmd[ZRC_GUIDE],
+   },
+   
+   {
+      RECALL,
+      SZ_PREVIOUS_CHANNEL,
+      NULL,
+      NULL,
+      NULL,
+      &cercCmd[ZRC_PREVIOUS_CHANNEL],
+   },
+   
+   {
+      PAGE_UP,
+      SZ_PAGE_UP,
+      NULL,
+      NULL,
+      NULL,
+      &cercCmd[ZRC_PAGE_UP],
+   },
+   
+   {
+      PAGE_DOWN,
+      SZ_PAGE_DOWN,
+      NULL,
+      NULL,
+      NULL,
+      &cercCmd[ZRC_PAGE_DOWN],
+   },
+   
+   {
+      NEXT_FAVORITE,
+      SZ_NEXT_FAVORITE,
+      NULL,
+      NULL,
+      NULL,
+      &cercCmd[ZRC_NEXT_FAVORITE],
+   },
+   
+   {
+      CHANNEL,
+      SZ_CHANNEL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+   },   
+
+// internal commands   
+   
+   {
+      AR_FIRST_REGISTRATION,
+      SZ_AR_FIRST_REGISTRATION,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+   },
+   
+   {
+      AR_MODE,
+      SZ_AR_MODE,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+   },
+   
+   {
+      FEEDBACK_TV_MENU,
+      SZ_FEEDBACK_TV_MENU,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+   },
+
+   {
+      FEEDBACK_TV_RETURN,
+      SZ_FEEDBACK_TV_RETURN,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+   },
+   
+// general commands   
+   
+   {
+      EXIT_PROCESS,
+      SZ_EXIT_PROCESS,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+   }
 };
 
 // enumerate whether an itach command depends on the success of the previous itach command
@@ -1044,25 +1052,38 @@ enum itachDependency {
    DEPENDENT
 };   
 
-// define the class passed to sendItachCmdThread as an argument 
-class ItachCmdParam {
+// global itachCmd instance used to process itach commands 
+class ItachCmd {
    public:
-      struct irTx * irTx;   // itach command structure
-      struct irRx * irRx;   // tira irRx structure expected to confirm a successful itach command request
-      int dependent;        // TRUE if this command depends on success of the previous command 
-      unsigned sequence;    // used to serialize itach commands
-      int delay;            // millisecond processing delay allowance
-   ItachCmdParam(
+      struct irTx * irTx;          // itach command structure
+      struct irRx * irRx;          // tira irRx structure expected to confirm a successful itach command request
+      struct irRx * irRxPending;   // expected IR command from the itach
+      BOOL irComplete;             // TRUE when irComplete message received from itach
+      BOOL prerequisiteFailure;    // TRUE when INDEPENDENT && !(irComplete && !irRxPending)
+      char debug[1024];            // tira irRxCmdCallback debug info from itach
+      int delay;                   // millisecond processing delay allowance
+      int dependent;               // DEPENDENT if this command depends on success of previous command 
+      
+   ItachCmd() {
+      irTx=NULL;
+      irRx=NULL;
+      irRxPending=NULL;
+      irComplete=TRUE;
+      prerequisiteFailure=FALSE;
+      debug[0]='\0';
+      delay=0;
+      dependent=INDEPENDENT;
+   }
+      
+   void set(
       struct irTx * irTx,
       int dependent,
-      int sequence,
       int delay) {
       this->irTx = irTx;
       this->irRx = irTxSzToIrRx(irTx->sz);
+      //printf("itachCmdArg: irRx %s\n", irRx->sz);
       this->dependent = dependent;
-      this->sequence = sequence;
       this->delay = delay;
-      irRx=NULL;
    }
    
    private:
@@ -1071,7 +1092,7 @@ class ItachCmdParam {
    // transmit is successfully received.
    struct irRx * irTxSzToIrRx(const char * sz) {
       int i;
-      char * match;
+      const char * match;
       
       // search for a partial end of string match
       // e.g. "tv channel down" -> "ir tv channel down"
@@ -1084,83 +1105,47 @@ class ItachCmdParam {
       }
       return rcCmd[UNDEFINED].irRx;
    }
-};
+} * itachCmd;
 
 
-// global variables used to sequentially process itach commands
-static struct {
-   struct irRx * irRxPending;
-   int irComplete;
-   int prerequisiteFailure;
-   unsigned sequence;
-   char debug[1024];
-} itachCmd;
-
-
-// tiraCmdThread processing definitions and declarations
-static unsigned tiraCmdActive=0;
-class TiraCmd {
-   public:
-      const char * sz;
-      char debug[1024];
-      int duplicate;
-      unsigned sequence;
-   TiraCmd(
-      const char * sz,
-      char * debug,
-      int duplicate,
-      unsigned sequence) {
-      this->sz = sz;
-      strncpy(this->debug, debug, sizeof(this->debug));
-      this->duplicate = duplicate;
-      this->sequence = sequence;
-   }
-};         
-     
-
-static struct {
-   HANDLE hThread;
-   int mode;
-} videoChange;       
-
-static SOCKET arAgentSocket;
 static struct socketDescriptor arAgentSd = {
+   AUDIO_RECEIVER_AGENT_HOSTNAME,
+   AUDIO_CONTROL_PORT,
+   INVALID_SOCKET,
    NULL,
-   MEDIA_CONTROL_PORT,
-   &arAgentSocket,
+   NO_ERROR,
    FALSE,
    FALSE,
-   "arAgent client",
+   FALSE,
+   "arAgent",
    NULL,
    NULL
 };
 
-static SOCKET itachSocket;   
 static struct socketDescriptor itachSd = {
    ITACH_AGENT_HOSTNAME,
    ITACH_CMD_PORT,
-   &itachSocket,
+   INVALID_SOCKET,
+   NULL,
+   NO_ERROR,
    FALSE,
    FALSE,
-   "itach client",
+   FALSE,
+   "itach",
    NULL,
    NULL
 };
 
 const char * tira_dll_absolute_path = "c:\\utils\\startup\\local\\rcagent\\tira2.dll";
-const char * moduleName = "rcAgent";
 
 BOOL forceForegroundWindow(HWND);
+BOOL isAudioFromVideo(void);
 BOOL isCmdStateSet(int);
 BOOL isExplorerForeground(void);
-BOOL isAudioFromVideo(void);
+BOOL isVideoPlayerActive(void);
 char * getForegroundWindowImageFileName(char *);
-char * rcCmdIdToSz(int);
+const char * remoteModeToSz(int);
 const char * vkCodeToSz(unsigned);
-DWORD tiraCmdThread(LPVOID);
-DWORD rxBroadcastThread(LPVOID);
-DWORD sendItachCmdThread(LPVOID);
-DWORD menuFlashThread(LPVOID);
 DWORD videoModeChangeThread(LPVOID);
 int __stdcall irRxCmdCallback(char const *);
 int filterCmd(int);
@@ -1172,35 +1157,35 @@ int getVideoMode(int);
 int irRxHasCode(struct irRx *, char const *);
 struct rcCmd * cmdSzToRcCmd(const char *);
 struct rcCmd * cmdIdToRcCmd(int);
+struct rcCmd * irRxCmdToRcCmd(char const *);
 void errMsgExit(char *);
-void initDefaults(void);
-void initClientThread(struct socketDescriptor *);
+void initZigbeeRemoteControl(void);
 void launchExplorer(const char *);
-void loadTiraDLL(void);
-void printErrorAndExit(char *);
-void processClientCmd(const char *, TiraCmd *);
 void processArAgentNotification(char *);
+void processClientCmd(QueuedMsg *);
+void processItachCmd(void);
+void restoreReceiverState(void);
 void restoreReceiverState(void);
 void sendArCmd(const char *);
 void sendDefault(struct rcCmd *);
 void sendItachCmd(int, int);
 void sendItachCmd(int, int, int, int);
-void sendItachCmdThreadStart(ItachCmdParam *);
+void sendStateInformation(QueuedMsg *);
 void sendVirtualKeyCode(unsigned);
 void sendVirtualKeyCode(unsigned, int);
+void sendZigbeeChannelRequest(const char *);
 void setAudioMode(int);
 void setAudioSource(int);
+void setDvdPower(int);
+void setNextForegroundWindow(void);
+void setSpeakerVolume(const char *, const char *);
+void setSurroundSound(int);
 void setVideoMode(int);
 void setVideoSource(int);
-void setNextForegroundWindow(void);
-void setSurroundSound(int);
-void tiraCmdThreadStart(TiraCmd *);
-void toggleDvdPower(int);
 void toggleVideoPower(void);
-void videoModeChangeThreadStart(int);
-void menuFlashThreadStart(void);
+void videoModeChangeThreadStart(BOOL, int);
 static char szDefaultMasterVolume[] = SZ_MASTER_VOLUME SZ_VIDEO_DEFAULT_MASTER_VOLUME;
-static DWORD irRxTime;
+static DWORD irRxTime=0, queuedIrRxTime=0;
 static int displayMode=UNDEFINED, nextMode=UNDEFINED;
 static int tvPowered=FALSE, dvdPowered=FALSE;
 static int dependentTimeout=FALSE;
