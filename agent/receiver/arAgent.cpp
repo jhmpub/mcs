@@ -29,6 +29,9 @@
  * 2016 Jul 17 jhm added smart remote functionality
  * 2018 Sep 04 jhm replaced spinlocks with message queues for thread
  *                 coordination and command serialization
+ * 2019 Feb 21 jhm rewrote dsp initialization and configuration routines
+ *                 to optimize settings for stereo and surround sound 
+ *                 media based on input source 
  *
  * Notes:
  * Use build.bat to build console and daemon process executables
@@ -180,6 +183,10 @@ void processServerConnect(const char * agent) {}
 void processServerMsg(const char * msg, struct socketDescriptor * sd) {}
 //// end agent specific socket hooks
 
+
+void irSend(int cmdId) {
+   irSend(tiraCmdIdToSz(cmdId));
+}   
 
 void irSend(const char * szCmd) {
    QueuedMsg * msg = new QueuedMsg(szCmd);
@@ -566,8 +573,9 @@ void initDefaultInputSourceDspProgram() {
    for (i=0; i<sizeof(dsp)/sizeof(struct dsp); i++) {
       tiraTransmit(dsp[i].audioSource);
       tiraTransmit(dsp[i].program);   // sets DSP_EFFECT_ON regardless of previous state
+      // toggle to the known DSP_EFFECT_OFF 
       if (dsp[i].state == DSP_EFFECT_OFF)
-         tiraTransmit(DSP_EFFECT_OFF);
+         tiraTransmit(DSP_EFFECT_TOGGLE);
       printf("\n");    
    }
 } 
@@ -849,7 +857,7 @@ struct dsp * getDsp() {
       if (dsp[i].audioSource==audioSource)
          return &dsp[i];
    }
-   return NULL;
+   return &dsp[i-1];
 }
 
 
@@ -872,14 +880,23 @@ void setInputSourceDspEffect() {
     static int previousState=UNDEFINED;
     
     if (isDspEffectToggleEnabled()) {
-        if ((frontSpeakerState==FRONT_SPEAKERS_ON && 
-             rearSpeakerState==REAR_SPEAKERS_ON &&
-             getDspEffectState()==DSP_EFFECT_OFF) ||
-             (frontSpeakerState==FRONT_SPEAKERS_OFF ||
-             rearSpeakerState==REAR_SPEAKERS_OFF) &&
-             getDspEffectState()==DSP_EFFECT_ON) {
+
+        if (rearSpeakerState==REAR_SPEAKERS_ON &&
+            frontSpeakerState==FRONT_SPEAKERS_ON &&
+            getDspEffectState() != DSP_EFFECT_ON) {
+            irSend(getDsp()->program);      // force DSP_EFFECT_ON
+            updateState(DSP_EFFECT_ON);
+            // resending the current audio input source insures if we happen
+            // to get another DSP_DOLBY_NORMAL within three seconds, the DSP
+            // mode will not toggle from "Normal" to "Enhanced"
+            tiraTransmit(audioSource);  
+        }    
+        
+        if ( (rearSpeakerState==REAR_SPEAKERS_OFF ||
+              frontSpeakerState==FRONT_SPEAKERS_OFF) &&
+              getDspEffectState() != DSP_EFFECT_OFF ) {
              // DSP only desirable for surround sound 
-             irSend(SZ_DSP_EFFECT_TOGGLE);
+            irSend(SZ_DSP_EFFECT_TOGGLE);   // set DSP_EFFECT_OFF
         }   
     }
     

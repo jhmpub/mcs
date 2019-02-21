@@ -21,63 +21,61 @@
 // Sending DSP_EFFECT_TOGGLE alternates between the 2 channel "Effect Off" mode
 // and the dsp mode associated with the current input source.
 //
-// Sending DSP_DOLBY_NORMAL switches from "Effect Off" to "Normal/Enhanced".
+// Sending DSP_DOLBY_NORMAL always sets DSP_EFFECT_ON.
 // Sending DSP_DOLBY_NORMAL twice within three seconds toggles between the 
 // "Normal" and "Enhanced" sub-programs.
 //
 // A dsp mode is associated with each input source and retained in the standby
-// power state.  All input source DSP settings are restored during
-// initialization to their default "Effect Off" or "Normal/Enhanced" setting to
-// insure a known state.  Unfortunately, it is not possible to assuredly 
-// initialize DSP_EFFECT_ON to the "Normal" setting.  DSP_DOLBY_NORMAL retains
-// the most recent "Normal" or "Enhanced" setting.
+// power state.  During initialization, each input source is set to the defined
+// DSP program forcing DSP_EFFECT_ON.  If state is predefined to DSP_EFFECT_OFF
+// the initialization routine will subsequently turn the DSP off.
 
 struct dsp { // digital sound processor
-   int audioSource;
-   const int program;
-   int state;                // DSP_EFFECT_ON or DSP_EFFECT_OFF
-   const int toggleEnable;   // define if state can change after init
+   const int audioSource;        // e.g. DVD, TUNER, CD, etc.
+   const int program;            // e.g. DSP_DOLBY_NORMAL (5 speaker)
+   int state;                    // DSP_EFFECT_OFF disables program
+   const int toggleEnable;       // define if state can change after init
 } dsp[] = {
 
-   {DVD,                // DVD always uses Dolby Normal
-    DSP_DOLBY_NORMAL,
-    DSP_EFFECT_ON,
-    DSP_EFFECT_TOGGLE_DISABLE},
+   {DVD,                         // DVD input
+    DSP_DOLBY_NORMAL,            // HD (five speaker) media 
+    DSP_EFFECT_ON,               // rear speaker channels lost if relay off
+    DSP_EFFECT_TOGGLE_DISABLE},  // front on+rear on - "Normal", front on+rear off - "Normal"
     
-   {FM,                 // TUNER always has the DSP Effect Off
-    DSP_DOLBY_NORMAL,
-    DSP_EFFECT_OFF,
-    DSP_EFFECT_TOGGLE_DISABLE},
+   {FM,                          // TUNER input
+    DSP_DOLBY_NORMAL,            // STEREO (two speaker) media
+    DSP_EFFECT_OFF,              // front speakers receive all sound
+    DSP_EFFECT_TOGGLE_DISABLE},  // front on+rear on - "Effect Off", front on+rear off - "Effect Off"
     
-   {GEORGIA,            // CD uses DSP_OFF for stereo and Dolby Normal when the surround speakers enabled
-    DSP_DOLBY_NORMAL,
-    DSP_EFFECT_OFF,
-    DSP_EFFECT_TOGGLE_ENABLE},
+   {GEORGIA,                     // CD input
+    DSP_DOLBY_NORMAL,            // HD (five speaker) media will decode fine but       
+    DSP_EFFECT_OFF,              // STEREO media will sound distorted/muffled if DSP "Normal"
+    DSP_EFFECT_TOGGLE_ENABLE},   // front on+rear on - "Normal", front on+rear off - "Effect Off" 
     
-   {JIMSON,             // CBL/SAT uses DSP_OFF for stereo and Dolby Normal when the surround speakers enabled
-    DSP_DOLBY_NORMAL,
-    DSP_EFFECT_OFF,
-    DSP_EFFECT_TOGGLE_ENABLE},
+   {JIMSON,                      // CBL/SAT input
+    DSP_DOLBY_NORMAL,            // HD (five speaker) media *typically*         
+    DSP_EFFECT_OFF,              // STEREO media will sound distorted/muffled if DSP "Normal"
+    DSP_EFFECT_TOGGLE_ENABLE},   // front on+rear on - "Normal", front on+rear off - "Effect Off"     
     
-   {LVR_MM,             // CD-R always uses Dolby Normal
-    DSP_DOLBY_NORMAL,
-    DSP_EFFECT_ON,
-    DSP_EFFECT_TOGGLE_DISABLE},
+   {LVR_MM,                      // CD-R input
+    DSP_DOLBY_NORMAL,            // HD (five speaker) media              
+    DSP_EFFECT_ON,               // rear speaker channels lost if relay off     
+    DSP_EFFECT_TOGGLE_DISABLE},  // front on+rear on - "Normal", front on+rear off - "Normal" 
     
-   {DEN_MM,             // V-AUX always uses Dolby Normal
-    DSP_DOLBY_NORMAL,
-    DSP_EFFECT_ON,
-    DSP_EFFECT_TOGGLE_DISABLE},
+   {DEN_MM,                      // V-AUX input unconnected source
+    DSP_DOLBY_NORMAL,            // HD (five speaker) media              
+    DSP_EFFECT_ON,               // rear speaker channels lost if relay off     
+    DSP_EFFECT_TOGGLE_DISABLE},  // front on+rear on - "Normal", front on+rear off - "Normal"
     
-   {TV,                 // D-TV/LD always uses Dolby Normal
-    DSP_DOLBY_NORMAL,
-    DSP_EFFECT_ON,
-    DSP_EFFECT_TOGGLE_DISABLE},
+   {TV,                          // D-TV/LD input
+    DSP_DOLBY_NORMAL,            // HD (five speaker) media             
+    DSP_EFFECT_ON,               // rear speaker channels lost if relay off    
+    DSP_EFFECT_TOGGLE_DISABLE},  // front on+rear on - "Normal", front on+rear off - "Normal"
     
-   {VIDEO_AUX,          // V-AUX is an unconnected source that always uses Dolby Normal for initialization
-    DSP_DOLBY_NORMAL,
-    DSP_EFFECT_ON,
-    DSP_EFFECT_TOGGLE_DISABLE},
+   {VIDEO_AUX,                   // V-AUX input unconnected source used for initialization
+    DSP_DOLBY_NORMAL,            // HD (five speaker) media             
+    DSP_EFFECT_ON,               // rear speaker channels lost if relay off
+    DSP_EFFECT_TOGGLE_DISABLE},  // front on+rear on - "Normal", front on+rear off - "Normal"
 };
 
 
@@ -111,6 +109,7 @@ void dispatchThread(void);
 void initConsoleModeExitHandler(void);
 void initDefaultInputSourceDspProgram(void);
 void initStartupDelay(int);
+void irSend(int);
 void irSend(const char *);
 void irSend(QueuedMsg *);
 void loadTiraDll(void);

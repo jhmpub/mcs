@@ -83,14 +83,14 @@ public class AcClient extends JFrame
     private void initAudioPanel() {
         setIconImage(Toolkit.getDefaultToolkit().getImage("audio.jpg"));
 
-        createArCmdGrouped(0,  0, 1, 1, 1, 1, "KQED",  "fm1", fmButtons);     // A1 88.3
-        createArCmdGrouped(1,  0, 1, 1, 1, 1, "89.1",  "fm2", fmButtons);     // A2
-        createArCmdGrouped(2,  0, 1, 1, 1, 1, "89.9",  "fm3", fmButtons);     // A3
+        createArCmdGrouped(0,  0, 1, 1, 1, 1, "KQED",  "fm1", fmButtons);     // A1 88.5
+        createArCmdGrouped(1,  0, 1, 1, 1, 1, "89.1",  "fm2", fmButtons);     // A2 89.1
+        createArCmdGrouped(2,  0, 1, 1, 1, 1, "89.9",  "fm3", fmButtons);     // A3 89.9
         createArCmdGrouped(3,  0, 1, 1, 1, 1, "KCRB",  "fm4", fmButtons);     // A4 90.9
-        createArCmdGrouped(4,  0, 1, 1, 1, 1, "95.5",  "fm5", fmButtons);     // A5
-        createArCmdGrouped(5,  0, 1, 1, 1, 1, "95.9",  "fm6", fmButtons);     // A6
-        createArCmdGrouped(6,  0, 1, 1, 1, 1, "102.7", "fm7", fmButtons);     // A7
-        createArCmdGrouped(7,  0, 1, 1, 1, 1, "103.5", "fm8", fmButtons);     // A8
+        createArCmdGrouped(4,  0, 1, 1, 1, 1, "95.5",  "fm5", fmButtons);     // A5 95.5
+        createArCmdGrouped(5,  0, 1, 1, 1, 1, "97.7",  "fm6", fmButtons);     // A6 97.7
+        createArCmdGrouped(6,  0, 1, 1, 1, 1, "102.7", "fm7", fmButtons);     // A7 102.7
+        createArCmdGrouped(7,  0, 1, 1, 1, 1, "103.5", "fm8", fmButtons);     // A8 103.5
         
         createArCmdGrouped(0,  1, 2, 2, 1, 2, "Computer", localHostname, inputButtons);
         createArCmdGrouped(2,  1, 2, 2, 1, 2, "Radio", "fm", inputButtons);
