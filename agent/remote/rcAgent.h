@@ -1117,9 +1117,7 @@ static struct socketDescriptor arAgentSd = {
    FALSE,
    FALSE,
    FALSE,
-   "arAgent",
-   NULL,
-   NULL
+   "arAgent"
 };
 
 static struct socketDescriptor itachSd = {
@@ -1131,9 +1129,7 @@ static struct socketDescriptor itachSd = {
    FALSE,
    FALSE,
    FALSE,
-   "itach",
-   NULL,
-   NULL
+   "itach"
 };
 
 const char * tira_dll_absolute_path = "c:\\utils\\startup\\local\\rcagent\\tira2.dll";

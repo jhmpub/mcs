@@ -27,8 +27,6 @@ struct socketDescriptor {
    int registered;             // optional
    int exit;                   // internal
    const char * description;   // optional
-   const char * reconnectMsg;  // optional, establishConnection sends if non-null 
-   const char * debugMsg;      // optional, console log msg override 
 };   
 
 
@@ -42,8 +40,6 @@ struct socketDescriptor {
    FALSE,                           \
    FALSE,                           \
    "undefined",                     \
-   NULL,                            \
-   NULL                             \
 }   
 
 BOOL areSocketThreadsRunning(void);

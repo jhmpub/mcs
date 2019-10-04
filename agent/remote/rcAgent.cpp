@@ -984,9 +984,6 @@ void processItachCmd() {
          itachCmd->irRxPending=irRx;
          itachCmd->irComplete=FALSE;
          
-         // try to recover with an immediate resend if itach connection lost
-         setReconnectMsg(&itachSd, szCode, szDesc);   
-         
          printf("processItachCmd requesting %s: %s\n", szTime(), szDesc); 
          sendMsg(&itachSd, szCode, szDesc);
       }   
@@ -1024,7 +1021,6 @@ void processItachCmd() {
       if (!dependent)
          itachCmd->prerequisiteFailure = TRUE;
    }   
-   clrReconnectMsg(&itachSd);
    Sleep(IR_RX_QUIET_PERIOD);   // pause to minimize interference
 }
 

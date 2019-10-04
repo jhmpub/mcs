@@ -147,7 +147,6 @@ void copySocketDescriptor(struct socketDescriptor * dst, struct socketDescriptor
    dst->connected = src->connected;
    dst->registered = src->registered;
    dst->exit = src->exit;
-   dst->reconnectMsg = src->reconnectMsg;
    strcpy((char *)dst->description, src->description);
 }   
    
@@ -196,9 +195,6 @@ int establishConnection(struct socketDescriptor * sd) {
            sd->socket);
            
    processServerConnect(sd->host);
-   
-   if (sd->reconnectMsg)
-      sendMsg(sd, sd->reconnectMsg, sd->debugMsg);
    
    singleThreadSd = sd;
    sd->connected=TRUE;        
@@ -403,24 +399,14 @@ void initClientThread(struct socketDescriptor * sd) {
 } 
 
 
-// override the default debug message when calling sendMsg() 
+// offer a debug message override when calling sendMsg() 
 void sendMsg(struct socketDescriptor * sd, const char * msg, const char * debugMsg) {
    if (!sd) {
       printq("sendMsg: NULL socketDescriptor\n");
       return;
-   }   
-   sd->debugMsg = debugMsg;
-   sendMsg(sd, msg);
-   sd->debugMsg = NULL;
-}
-
-void sendMsg(struct socketDescriptor * sd, const char * msg) {
-   if (!sd) {
-      printq("sendMsg: NULL socketDescriptor\n");
-      return;
-   }   
-      
-   printq("Send msg to host %s: %s\n", sd->host, sd->debugMsg ? sd->debugMsg : msg);
+   }
+   
+   printq("Send msg to host %s: %s\n", sd->host, debugMsg ? debugMsg : msg);
    
    int len = strlen(msg);
    char * buf = (char *) malloc(len + 2);
@@ -435,6 +421,11 @@ void sendMsg(struct socketDescriptor * sd, const char * msg) {
    free(buf);
 }
 
+void sendMsg(struct socketDescriptor * sd, const char * msg) {
+   sendMsg(sd, msg, NULL);
+}   
+      
+
 
 #ifndef MCS
 // sendMsg(const char *) is not valid in a multithreaded, multisocket scenario
@@ -446,13 +437,12 @@ void sendMsg(struct socketDescriptor * sd, const char * msg) {
 // for simplicity in a single threaded, single connection scenario,
 // send a message on the only existing socket
 void sendMsg(const char * msg) {
-   sendMsg(singleThreadSd, msg);
+   sendMsg(msg, NULL);
 }
 
 // override the default debug message when calling sendMsg() 
 void sendMsg(const char * msg, const char * debugMsg) {
-   singleThreadSd->debugMsg = debugMsg;
-   sendMsg(singleThreadSd, msg);
+   sendMsg(singleThreadSd, msg, debugMsg);
 }                     
 #endif
 
@@ -617,18 +607,6 @@ DWORD rxClientThread(LPVOID arg) {
 }
 
 
-void clrReconnectMsg(struct socketDescriptor * sd) {
-   sd->reconnectMsg=NULL;
-   sd->debugMsg=NULL;
-}
-
-
-void setReconnectMsg(struct socketDescriptor * sd, const char * msg, const char * debugMsg) {
-   sd->reconnectMsg=msg;
-   sd->debugMsg=debugMsg;
-}
-
-   
 void rxClientThreadExit(struct socketDescriptor * sd) {
    sd->exit=TRUE;
    shutdownConnection(sd);
