@@ -18,7 +18,7 @@ const char * szMode[REMOTE_MODES] = {"tv", "dvd", "vcr"};
 int main(int argc, char **argv) {
 
    char c='\0';
-   sd.host = "lvr-itach"; sd.port=4998; 
+   sd.host = (char *) "lvr-itach"; sd.port=4998; 
    sd.description = "itach"; sd.exit = TRUE;
     
    initWinsock();

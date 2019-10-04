@@ -18,7 +18,7 @@
 #define KBUFFERSIZE 1024
 
 struct socketDescriptor {
-   const char * host;
+   char * host;
    int port;
    SOCKET socket;
    HANDLE hThread;
@@ -33,7 +33,7 @@ struct socketDescriptor {
 
 
 #define DEFAULT_SOCKET_DESCRIPTOR { \
-   "",                              \
+   (char *) "",                     \
    0,                               \
    INVALID_SOCKET,                  \
    NULL,                            \
@@ -64,7 +64,7 @@ void broadcastMsg(const char *);
 void clrReconnectMsg(struct socketDescriptor *);
 void copySocketDescriptor(struct socketDescriptor *, struct socketDescriptor *);
 void initClientThread(struct socketDescriptor *);
-void initTcpServer(const char *, int);
+void initTcpServer(char *, int);
 void printConsoleLogMsgs(void);
 void printErrorAndExit(const char *);
 void printErrorMsg(const char *);

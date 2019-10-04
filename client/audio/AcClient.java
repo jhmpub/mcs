@@ -83,7 +83,7 @@ public class AcClient extends JFrame
     private void initAudioPanel() {
         setIconImage(Toolkit.getDefaultToolkit().getImage("audio.jpg"));
 
-        createArCmdGrouped(0,  0, 1, 1, 1, 1, "KQED",  "fm1", fmButtons);     // A1 88.5
+        createArCmdGrouped(0,  0, 1, 1, 1, 1, "KQED",  "fm1", fmButtons);     // A1 88.3
         createArCmdGrouped(1,  0, 1, 1, 1, 1, "89.1",  "fm2", fmButtons);     // A2 89.1
         createArCmdGrouped(2,  0, 1, 1, 1, 1, "89.9",  "fm3", fmButtons);     // A3 89.9
         createArCmdGrouped(3,  0, 1, 1, 1, 1, "KCRB",  "fm4", fmButtons);     // A4 90.9

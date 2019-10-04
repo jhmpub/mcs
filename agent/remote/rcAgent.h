@@ -289,7 +289,7 @@ static struct rcCmd {
       &irRxCmd[TIRA_VCR_PAUSE].key,
       &virtualKey[SC_PLAY_PAUSE].shortcut,
       irTxCmd[ITACH_PAUSE].remote,
-      &cercCmd[ZRC_PAUSE],
+      &cercCmd[ZRC_PLAY],
    },
     
    {
@@ -1109,7 +1109,7 @@ class ItachCmd {
 
 
 static struct socketDescriptor arAgentSd = {
-   AUDIO_RECEIVER_AGENT_HOSTNAME,
+   (char *) AUDIO_RECEIVER_AGENT_HOSTNAME,
    AUDIO_CONTROL_PORT,
    INVALID_SOCKET,
    NULL,
@@ -1123,7 +1123,7 @@ static struct socketDescriptor arAgentSd = {
 };
 
 static struct socketDescriptor itachSd = {
-   ITACH_AGENT_HOSTNAME,
+   (char *) ITACH_AGENT_HOSTNAME,
    ITACH_CMD_PORT,
    INVALID_SOCKET,
    NULL,

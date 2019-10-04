@@ -47,6 +47,7 @@ DWORD serverListenThread(LPVOID arg) {
    SOCKET socket;
    struct socketDescriptor * serverSd;
    struct socketDescriptor sd = DEFAULT_SOCKET_DESCRIPTOR;
+   sd.host = host;
    sd.description = "client sd";
 
    while (1) {
@@ -73,7 +74,6 @@ DWORD serverListenThread(LPVOID arg) {
                 WSAGetLastError());
       }
       else {
-         HANDLE hThread;
          printq("\rServer accepted connection from %s on socket %d\n",
                 lookupName(inet_ntoa(sinRemote.sin_addr), host, sizeof(host)), 
                 socket);
@@ -366,7 +366,7 @@ char * initWinsock() {
 }
 
 
-void initTcpServer(const char * host, int port) {
+void initTcpServer(char * host, int port) {
     serverListenSd.host = host;
     serverListenSd.port = port;
     serverListenSd.socket = socketBind(host, port);
@@ -411,6 +411,7 @@ void sendMsg(struct socketDescriptor * sd, const char * msg, const char * debugM
    }   
    sd->debugMsg = debugMsg;
    sendMsg(sd, msg);
+   sd->debugMsg = NULL;
 }
 
 void sendMsg(struct socketDescriptor * sd, const char * msg) {
