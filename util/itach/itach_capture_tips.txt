@@ -37,7 +37,7 @@ Capturing IR Commands
 ~~~~~~~~~~~~~~~~~~~~~
 Run iLearn.exe
 set IR Learner pull down to "iTach Learner"
-set the IP Address
+set the IP Address (hostname works)
 Connect
 set the Capture options Connector to match the jack the blaster is plugged
 (rightmost jack is Connector 3)

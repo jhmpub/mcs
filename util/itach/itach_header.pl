@@ -7,6 +7,7 @@ $id=1;
 @mode = qw(tv dvd vcr);
 
 open CAPTURE, ("<itach_codes.cmd") or die "error: unable to open itach_codes.cmd\n";
+open RENUM, (">itach_codes.renum") or die "error: unable to open itach_codes.renum\n";
 while (<CAPTURE>) {
    if (/rem\s+(\w+)/) {
       $label = $enum = $1;
@@ -32,7 +33,11 @@ while (<CAPTURE>) {
       }   
       $mode++;
    }
+   print RENUM $_;
 }
+close CAPTURE;
+close RENUM;
+rename "itach_codes.renum", "itach_codes.cmd" or die "error: ".$!."\n";
 
 print 
    "////\n".

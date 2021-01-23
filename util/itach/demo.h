@@ -7,7 +7,7 @@ struct charToIrTx {
    {'[',              irTxCmd[ITACH_CHAPTER_BACK].remote},
    {']',              irTxCmd[ITACH_CHAPTER_NEXT].remote},
    {'s',              irTxCmd[ITACH_DISPLAY].remote},
-   {'{',              irTxCmd[ITACH_HDMI_SOURCE_SET_TOP].remote},   
+   {'{',              irTxCmd[ITACH_HDMI_SOURCE_DVD].remote},   
    {'}',              irTxCmd[ITACH_HDMI_SOURCE_DVR].remote},   
    {'t',              irTxCmd[ITACH_HDMI_SOURCE_TOGGLE].remote},   
    {'e',              irTxCmd[ITACH_EJECT].remote},

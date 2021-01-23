@@ -13,13 +13,15 @@
                                         // 
 #define  KBD_CTRL_B            0x4211   // << -> WMC 7 seconds back
 #define  KBD_LEFT_ARROW        0x0025   // << -> YOUTUBE 5 seconds back
+#define  KBD_LEFT_ARROW_ALT    0x2512   // << -> VLC 10 seconds back
 #define  KBD_LEFT_ARROW_CTRL   0x2511   // << -> VLC 60 seconds back
 #define  KBD_LEFT_ARROW_SHIFT  0x2510   // << -> NETFLIX 10 seconds back
                                         // 
 #define  KBD_CTRL_F            0x4611   // >> -> WMC 30 seconds forward         
 #define  KBD_RIGHT_ARROW       0x0027   // >> -> YOUTUBE 5 seconds forward
-#define  KBD_RIGHT_ARROW_SHIFT 0x2710   // << -> NETFLIX 10 seconds forward
+#define  KBD_RIGHT_ARROW_ALT   0x2712   // << -> VLC 10 seconds forward
 #define  KBD_RIGHT_ARROW_CTRL  0x2711   // >> -> VLC 60 seconds forward
+#define  KBD_RIGHT_ARROW_SHIFT 0x2710   // << -> NETFLIX 10 seconds forward
                                         // 
 #define  KBD_CTRL_P            0x5011   // > or " WMC play/pause
 #define  KBD_SPACE             0x0020   // > or " NETFLIX, VLC, YOUTUBE play/pause
@@ -29,6 +31,8 @@
 #define  KBD_ARROW_UP          0x0026   // Up Menu Arrow -> Up Keyboard Arrow
 #define  KBD_ENTER             0x000D   // > -> Enter
 #define  KBD_ALT_F4            0x7312   // Stop -> Alt-F4 
+#define  KBD_J                 0x004A   // j -> YOUTUBE 10 seconds back
+#define  KBD_L                 0x004C   // l -> YOUTUBE 10 seconds forward
 #define  KBD_N0                0x0030   // 0 -> YOUTUBE  0%
 #define  KBD_N1                0x0031   // 1 -> YOUTUBE 10%
 #define  KBD_N2                0x0032   // 2 -> YOUTUBE 20%
@@ -46,13 +50,15 @@
                                     
 #define  SZ_KBD_CTRL_B              "ctrl b"
 #define  SZ_KBD_LEFT_ARROW          "left arrow"
+#define  SZ_KBD_LEFT_ARROW_ALT      "alt left arrow"
 #define  SZ_KBD_LEFT_ARROW_CTRL     "ctrl left arrow"
 #define  SZ_KBD_LEFT_ARROW_SHIFT    "shift left arrow"
                                
 #define  SZ_KBD_CTRL_F              "ctrl f"
 #define  SZ_KBD_RIGHT_ARROW         "right arrow"
-#define  SZ_KBD_RIGHT_ARROW_SHIFT   "ctrl right arrow"
-#define  SZ_KBD_RIGHT_ARROW_CTRL    "shift right arrow"
+#define  SZ_KBD_RIGHT_ARROW_ALT     "alt right arrow"
+#define  SZ_KBD_RIGHT_ARROW_CTRL    "ctrl right arrow"
+#define  SZ_KBD_RIGHT_ARROW_SHIFT   "shift right arrow"
                                
 #define  SZ_KBD_CTRL_P              "ctrl p"
 #define  SZ_KBD_SPACE               "space"
@@ -62,6 +68,8 @@
 #define  SZ_KBD_ARROW_UP            "arrow up"
 #define  SZ_KBD_ENTER               "enter"
 #define  SZ_KBD_ALT_F4              "alt f4"
+#define  SZ_KBD_J                   "J"
+#define  SZ_KBD_L                   "L"
 #define  SZ_KBD_N0                  "N0"
 #define  SZ_KBD_N1                  "N1"
 #define  SZ_KBD_N2                  "N2"
@@ -89,10 +97,14 @@ struct appTitle {
 } appTitle[] = {    
    { "Netflix - ", NETFLIX },
    { "Microsoft Silverlight", NETFLIX },
+   { "Peacock", NETFLIX },
+   { "Prime Video", NETFLIX },
+   { "Xfinity Stream", NETFLIX },  // sm jmp fwd 30 sec, sm jmp back 15 sec
    { "VLC media player", VLC },
    { "Windows Media Center", WMC },
-   { "YouTube - ", YOUTUBE },
-   { "youtube.com", YOUTUBE }
+//   { "YouTube - ", YOUTUBE },
+   { "youtube.com", YOUTUBE },
+   { " - Google Chrome", YOUTUBE } // default to YOUTUBE for chrome browser
 }; 
 
 enum vkCodeId {
@@ -107,6 +119,8 @@ enum vkCodeId {
    SC_ENTER,
    SC_ALT_F4,
    SC_CTRL_R,
+   SC_J,
+   SC_L,
    SC_N0,
    SC_N1,
    SC_N2,
@@ -168,13 +182,13 @@ static struct virtualKey {
       {
          {
             KBD_LEFT_ARROW_SHIFT,
-            KBD_LEFT_ARROW_CTRL,
+            KBD_LEFT_ARROW_ALT,
             KBD_CTRL_B,
             KBD_LEFT_ARROW
          },
          {
             SZ_KBD_LEFT_ARROW_SHIFT,
-            SZ_KBD_LEFT_ARROW_CTRL,
+            SZ_KBD_LEFT_ARROW_ALT,
             SZ_KBD_CTRL_B,
             SZ_KBD_LEFT_ARROW
          }   
@@ -185,13 +199,13 @@ static struct virtualKey {
       {
          {
             KBD_RIGHT_ARROW_SHIFT,
-            KBD_RIGHT_ARROW_CTRL,
+            KBD_RIGHT_ARROW_ALT,
             KBD_CTRL_F,
             KBD_RIGHT_ARROW
          },
          {
             SZ_KBD_RIGHT_ARROW_SHIFT,
-            SZ_KBD_RIGHT_ARROW_CTRL,
+            SZ_KBD_RIGHT_ARROW_ALT,
             SZ_KBD_CTRL_F,
             SZ_KBD_RIGHT_ARROW
          }   
@@ -254,6 +268,20 @@ static struct virtualKey {
       {
          {KBD_CTRL_R,0,0,0}, 
          {SZ_KBD_CTRL_R,NULL,NULL,NULL}
+      }   
+   },
+   {
+      SC_J,
+      {
+         {KBD_J,0,0,0}, 
+         {SZ_KBD_J,NULL,NULL,NULL}
+      }   
+   },
+   {
+      SC_L,
+      {
+         {KBD_L,0,0,0}, 
+         {SZ_KBD_L,NULL,NULL,NULL}
       }   
    },
    {

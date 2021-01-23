@@ -82,11 +82,12 @@ public class AcClient extends JFrame
     
     private void initAudioPanel() {
         setIconImage(Toolkit.getDefaultToolkit().getImage("audio.jpg"));
-
+		  // manully tune to station
+		  // store: MEMORY (flash), PRESET / TUNING (1/8), MEMORY (locks station)
         createArCmdGrouped(0,  0, 1, 1, 1, 1, "KQED",  "fm1", fmButtons);     // A1 88.3
-        createArCmdGrouped(1,  0, 1, 1, 1, 1, "89.1",  "fm2", fmButtons);     // A2 89.1
-        createArCmdGrouped(2,  0, 1, 1, 1, 1, "89.9",  "fm3", fmButtons);     // A3 89.9
-        createArCmdGrouped(3,  0, 1, 1, 1, 1, "KCRB",  "fm4", fmButtons);     // A4 90.9
+        createArCmdGrouped(1,  0, 1, 1, 1, 1, "89.9",  "fm2", fmButtons);     // A2 89.9
+        createArCmdGrouped(2,  0, 1, 1, 1, 1, "KRCB",  "fm3", fmButtons);     // A3 90.9
+        createArCmdGrouped(3,  0, 1, 1, 1, 1, "KPFA",  "fm4", fmButtons);     // A4 94.1
         createArCmdGrouped(4,  0, 1, 1, 1, 1, "95.5",  "fm5", fmButtons);     // A5 95.5
         createArCmdGrouped(5,  0, 1, 1, 1, 1, "97.7",  "fm6", fmButtons);     // A6 97.7
         createArCmdGrouped(6,  0, 1, 1, 1, 1, "102.7", "fm7", fmButtons);     // A7 102.7

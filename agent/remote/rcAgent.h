@@ -432,7 +432,7 @@ static struct rcCmd {
    {
       IR_IGNORE,
       SZ_IR_IGNORE,
-      &irRxCmd[TIRA_DVD_DISPLAY].key,
+      &irRxCmd[TIRA_DVD_INFO].key,
       NULL,
       NULL,
       NULL,

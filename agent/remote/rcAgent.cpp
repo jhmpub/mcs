@@ -299,8 +299,8 @@ void processClientCmd(QueuedMsg * msg) {
          if (displayMode==UNDEFINED) {
             sendArCmd(SZ_FRONT_SPEAKERS_ON);
             sendArCmd(szDefaultMasterVolume);
-            setVideoMode(TV);    // force initialization to a known state
-            setAudioMode(TV);
+            setVideoMode(DVR);    // force initialization to a known state
+            setAudioMode(DVR);
          }   
          else {   
             setSurroundSound(displayMode==DVD);
@@ -313,7 +313,7 @@ void processClientCmd(QueuedMsg * msg) {
          if (displayMode==UNDEFINED && tvPowered) { 
             nextMode=displayMode=cmdSzToRcCmdId(szCmdArg);
             // initialize the current displayMode according to a registered 
-            // client's audio state by setting the TV input 
+            // client's audio state by setting the DVR input 
             //  tv: video input menu+4 (source hdmi switch)
             // dvd: video input menu+2 (source dvd)
             // dvr: video input menu+4 (source hdmi switch)
@@ -370,7 +370,7 @@ void processClientCmd(QueuedMsg * msg) {
                   sendVirtualKeyCode(KBD_CTRL_F, 3);
                   break;
                case YOUTUBE:
-                  // left arrow eighteen 5 second periods (90)
+                  // right arrow eighteen 5 second periods (90)
                   sendVirtualKeyCode(KBD_RIGHT_ARROW, 18);
                   break;
                default:   
@@ -472,8 +472,8 @@ void processClientCmd(QueuedMsg * msg) {
             sendArCmd(SZ_CHANNEL_B_OFF);
             sendArCmd(szDefaultMasterVolume);
             if (displayMode==UNDEFINED) {
-               setVideoMode(TV);
-               setAudioMode(TV);
+               setVideoMode(DVR);
+               setAudioMode(DVR);
             } else {
                setAudioMode(displayMode);
             }   
@@ -498,7 +498,8 @@ void processClientCmd(QueuedMsg * msg) {
                   nextMode=DVR;
                   break;
                case DVR:
-                  nextMode=TV;
+                  //nextMode=TV;
+                  nextMode=DVD;
                   break;
                default:
                   printf("error: invalid displayMode %s\n", cmdIdToRcCmd(nextMode)->sz);
@@ -655,8 +656,8 @@ void toggleVideoPower() {
       setDvdPower(displayMode);
    }   
    else {
-      if (displayMode!=TV)
-         setVideoMode(TV);
+      if (displayMode!=DVR)
+         setVideoMode(DVR);
       else if (isAudioFromVideo()) 
          setAudioSource(VIDEO_AUX);   // pseudo mute   
          
@@ -735,8 +736,8 @@ void setVideoMode(int requestedMode) {
       //  tv: video input menu+4 (source hdmi switch)
       // dvd: video input menu+2 (source dvd)
       // dvr: video input menu+4 (source hdmi switch)
-      sendItachCmd(VIDEO_INPUT_MENU, TV_MODE, INDEPENDENT, 1500);
-      sendItachCmd(requestedMode, TV_MODE, DEPENDENT, 4000);
+      //sendItachCmd(VIDEO_INPUT_MENU, TV_MODE, INDEPENDENT, 1500);
+      //sendItachCmd(requestedMode, TV_MODE, DEPENDENT, 4000);
    }
    
    // set the hdmi switch source   

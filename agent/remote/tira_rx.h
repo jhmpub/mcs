@@ -17,8 +17,8 @@
 
 #define SZ_IR_DVD_CHAPTER_BACK   "ir dvd chapter back"
 #define SZ_IR_DVD_CHAPTER_NEXT   "ir dvd chapter next"
-#define SZ_IR_DVD_DISPLAY        "ir dvd display"
-#define SZ_IR_DVD_EJECT          "ir dvd eject"
+#define SZ_IR_DVD_INFO           "ir dvd info"   // sony remote n/a
+#define SZ_IR_DVD_EJECT          "ir dvd eject"  // sony remote n/a
 #define SZ_IR_DVD_FAST_FORWARD   "ir dvd fast forward"
 #define SZ_IR_DVD_MENU           "ir dvd menu"
 #define SZ_IR_DVD_MENU_DOWN      "ir dvd menu down"
@@ -108,34 +108,33 @@
 // because of ir noise emitted from a plasma tv display or when
 // keys from two different remotes are mapped to the same command 
 //
-// many pioneer ir command codes look identical to the tira receiver :(
 static const char * undefCharArray[]   = {SZ_UNDEFINED};
-static const char * dvdChapterBack[]   = {"0B237E7577F5","0B287EB577F5"};
-static const char * dvdChapterNext[]   = {"0BA37E3577F5","33F38E35B835"};
-static const char * dvdDisplay[]       = {"0B2C7E7D77F5"};
-static const char * dvdEject[]         = {"0B2C7E7D77F5"};
-static const char * dvdFastForward[]   = {"0B2C7E7D77F5"};
-static const char * dvdMenu[]          = {"0B2C7E7D77F5"}; 
-static const char * dvdMenuDown[]      = {"0B2C7E7D77F5"};  
-static const char * dvdMenuLeft[]      = {"0B2C7E7D77F5"};
-static const char * dvdMenuRight[]     = {"0B2C7E7D77F5"};
-static const char * dvdMenuUp[]        = {"0B2C7E7D77F5"};
-static const char * dvdN0[]            = {"0B2C7E7D77F5"};
-static const char * dvdN1[]            = {"0B2C7E7D77F5"};
-static const char * dvdN2[]            = {"0B2C7E7D77F5"};
-static const char * dvdN3[]            = {"0B2C7E7D77F5"};
-static const char * dvdN4[]            = {"0B2C7E7D77F5"};
-static const char * dvdN5[]            = {"0B2C7E7D77F5"};
-static const char * dvdN6[]            = {"0B2C7E7D77F5"};
-static const char * dvdN7[]            = {"0B2C7E7D77F5"};
-static const char * dvdN8[]            = {"0B2C7E7D77F5"};
-static const char * dvdN9[]            = {"0B2C7E7D77F5"};
-static const char * dvdOk[]            = {"0B2C7E7D77F5"};
-static const char * dvdPause[]         = {"0B037E5577F5"};
-static const char * dvdPlay[]          = {"0B837ED577F5"};
-static const char * dvdPower[]         = {"0B2C7E7D77F5"};
-static const char * dvdRewind[]        = {"0B2C7E7D77F5"};
-static const char * dvdStop[]          = {"0BAC7EFD77F5"};
+static const char * dvdChapterBack[]   = {"7FE81E669E61"};
+static const char * dvdChapterNext[]   = {"7F681FE69F61"};
+static const char * dvdInfo[]          = {"7F161F989F61"};
+static const char * dvdEject[]         = {"7F081F869F61"};
+static const char * dvdFastForward[]   = {"7F901E1E9E61"};
+static const char * dvdMenu[]          = {"8797E6199E61"}; 
+static const char * dvdMenuDown[]      = {"8777E7F99F61"};  
+static const char * dvdMenuLeft[]      = {"07F666789E61"};
+static const char * dvdMenuRight[]     = {"071667989F61"};
+static const char * dvdMenuUp[]        = {"8789E6079E61"};
+static const char * dvdN0[]            = {"8769E7E79F61"};
+static const char * dvdN1[]            = {"7F961E189E61"};
+static const char * dvdN2[]            = {"7F6E1FE09F61"};
+static const char * dvdN3[]            = {"7FEE1E209E61"};
+static const char * dvdN4[]            = {"7F0E1F809F61"};
+static const char * dvdN5[]            = {"7F8E1E009E61"};
+static const char * dvdN6[]            = {"8771E7FF9F61"};
+static const char * dvdN7[]            = {"87F1E67F9E61"};
+static const char * dvdN8[]            = {"8711E79F9F61"};
+static const char * dvdN9[]            = {"8791E61F9E61"};
+static const char * dvdOk[]            = {"077667F89F61"};
+static const char * dvdPause[]         = {"7F761FF89F61"};
+static const char * dvdPlay[]          = {"7FF01E7E9E61"};
+static const char * dvdPower[]         = {"7F701FFE9F61"};
+static const char * dvdRewind[]        = {"7F101F9E9F61"};
+static const char * dvdStop[]          = {"7FF61E789E61"};
 
 static const char * hdmiSourceInput1[] = {"218376D55575"};
 static const char * hdmiSourceInput2[] = {"218C76DD5575"};
@@ -240,7 +239,7 @@ enum tiraId {
    TIRA_UNDEFINED,
    TIRA_DVD_CHAPTER_BACK,
    TIRA_DVD_CHAPTER_NEXT,
-   TIRA_DVD_DISPLAY,
+   TIRA_DVD_INFO,
    TIRA_DVD_FAST_FORWARD,
    TIRA_DVD_EJECT,
    TIRA_DVD_MENU,
@@ -348,8 +347,8 @@ struct irRxCmd {
    TIRA_DVD_CHAPTER_NEXT,
    {sizeof(dvdChapterNext)/sizeof(char *),dvdChapterNext,CMD_CODE_LENGTH,SZ_IR_DVD_CHAPTER_NEXT,0},
 
-   TIRA_DVD_DISPLAY,
-   {sizeof(dvdDisplay)/sizeof(char *),dvdDisplay,CMD_CODE_LENGTH,SZ_IR_DVD_DISPLAY,0},
+   TIRA_DVD_INFO,
+   {sizeof(dvdInfo)/sizeof(char *),dvdInfo,CMD_CODE_LENGTH,SZ_IR_DVD_INFO,0},
 
    TIRA_DVD_EJECT,
    {sizeof(dvdEject)/sizeof(char *),dvdEject,CMD_CODE_LENGTH,SZ_IR_DVD_EJECT,0},
