@@ -48,8 +48,8 @@ set BIN=%PROGRAM_DRIVE%\pkg\win32\mingw\bin
 set BIN=%PROGRAM_DRIVE%\pkg\win32\cygwin\bin
 %BIN%\windres -i arAgent.rc -o info.o
 %BIN%\gcc -c -g %INC% arAgent.cpp
-%BIN%\gcc -c -g -DMCS %CMN%\socket.cpp
-%BIN%\gcc -c -g -DMCS -DCONSOLE_MODE %CMN%\common.cpp
+%BIN%\gcc -c -g -o socket.o -DMCS %INC% %CMN%\socket.cpp
+%BIN%\gcc -c -g -o common.o -DMCS -DCONSOLE_MODE %INC% %CMN%\common.cpp
 %BIN%\gcc -o arAgentConsole %OBJ% %LIBS%
 
 :DONE

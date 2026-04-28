@@ -56,10 +56,10 @@ set BIN=%PROGRAM_DRIVE%\pkg\win32\mingw\bin
 set BIN=%PROGRAM_DRIVE%\pkg\win32\cygwin\bin
 %BIN%\windres -i rcAgent.rc -o info.o
 %BIN%\gcc -c -g %INC% rcAgent.cpp
-%BIN%\gcc -c -g %INC% %RTI%\zrc.cpp
-%BIN%\gcc -c -g %INC% %RTI%\zrcc.cpp
-%BIN%\gcc -c -g -DMCS %CMN%\socket.cpp
-%BIN%\gcc -c -g -DMCS -DCONSOLE_MODE %CMN%\common.cpp
+%BIN%\gcc -c -g -o zrc.o %INC% %RTI%\zrc.cpp
+%BIN%\gcc -c -g -o zrcc.o %INC% %RTI%\zrcc.cpp
+%BIN%\gcc -c -g -o socket.o -DMCS %INC% %CMN%\socket.cpp
+%BIN%\gcc -c -g -o common.o -DMCS -DCONSOLE_MODE %INC% %CMN%\common.cpp
 %BIN%\gcc -o rcAgentConsole %OBJ% %LIBS%
 
 :DONE

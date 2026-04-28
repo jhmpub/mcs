@@ -52,8 +52,8 @@
  
 #include <winsock2.h>
 #include <stdio.h>
-#include "common.h"
-#include "socket.h"
+#include "../../common/common.h"
+#include "../../common/socket.h"
 #include "arAgent.h"
 
 int main(int argc, char ** argv) {

@@ -37,10 +37,8 @@ Installation Steps:
    "Update Driver Software..."
    Select "Browse my computer for driver software"
    Browse to the folder containing this readme and more 
-   importantly the file usb_RemoTICdcDriver.inf
+   importantly the file ccxxxx_usb_cdc.inf
    Select "Next"
-   Ignore the Windows Security warning and select
-   "Install this driver software anyway"
 5. Run the "../demo.exe <comN>" utility to pair the CC2531
    with a Comcast set top box
  

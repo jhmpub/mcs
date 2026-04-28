@@ -19,7 +19,7 @@
 
 // direct zrcc.h to not compile this module as a controller or a target
 #define HOST_CMN TRUE  
-#include "zrcc.h"
+#include "../../common/rti/zrcc.h"
 
 int main(int argc, char **argv) {
 

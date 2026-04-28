@@ -1313,8 +1313,8 @@ struct tiraCmd tiraCmd[] = {
    {JIMSON,
     SZ_JIMSON,
     &audioSource,
-    sizeof(irCblSat),
-    irCblSat},
+    sizeof(irCDR),
+    irCDR},
     
    {LVR_MM,
     SZ_LVR_MM,

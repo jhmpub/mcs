@@ -24,7 +24,7 @@ set LIBS=-lstdc++ -lws2_32
 set OBJ=msg.o socket.o
 
 %BIN%\gcc -c -g %INC% msg.cpp
-%BIN%\gcc -c -g %INC% %CMN%\socket.cpp
+%BIN%\gcc -c -g -o socket.o %INC% %CMN%\socket.cpp
 %BIN%\gcc -static -o msg %OBJ% %LIBS%
 
 :DONE

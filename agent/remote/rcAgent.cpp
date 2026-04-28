@@ -54,6 +54,7 @@
 // 2018 Sep 04 jhm added zigbee remote control functionality
 //                 replaced spinlocks with message queues for thread
 //                 coordination and command serialization
+// 2024 Apr 03 jhm added IR cmd translations for hbo max
 
 
 // SendInput() is only declared for Windows XP and later
@@ -63,11 +64,11 @@
 #include <windows.h>
 #include <psapi.h>
 #include <stdio.h>
-#include "common.h"
-#include "socket.h"
-#include "tira_dll.h"
+#include "../../common/common.h"
+#include "../../common/socket.h"
+#include "../../common/tira_dll.h"
 #include "rcAgent.h"
-#include "zrc.h"
+#include "../../common/rti/zrc.h"
 
 int main(int argc, char ** argv) {
 
@@ -285,15 +286,32 @@ void processClientCmd(QueuedMsg * msg) {
    struct rcCmd * cmd = cmdSzToRcCmd(isMsgChannelRequest ? SZ_CHANNEL : szCmd);
    const char * szCmdArg = strlen(szCmd) > strlen(cmd->sz) ? &szCmd[strlen(cmd->sz) + 1] : NULL;
    static BOOL refreshEnable=TRUE, tvGuide=FALSE;
-   int i, appId = getForegroundWindowAppID();
-   
+   static int hboControlActivationTime=0;
+   int appId = getForegroundWindowAppID(), classId = getForegroundWindowClassID(), i;
    const char * channelPrefix = cmd->id==CHANNEL ? "channel " : "";
    const char * undefinedSuffix = cmd->id==UNDEFINED ? " undefined" : "";
-   printf("\nprocessClientCmd: %s%s%s\n", channelPrefix, szCmd, undefinedSuffix);
+   const char * appPrefix = appId<APP_UNKNOWN ? appIdSz[appId] : "";
+   printf("\nprocessClientCmd: %s%s%s%s\n", channelPrefix, appPrefix, szCmd, undefinedSuffix);
       
    if (irCmd)
       printf("%s", irCmd->debug);
-   
+
+   switch (cmd->id) {
+      case ARROW_LEFT:
+      case ARROW_RIGHT:
+      case FAST_FORWARD:
+      case PAUSE:
+      case REWIND:
+         if (displayMode==DVR && appId==HBOMAX) { 
+            if (irRxTime - hboControlActivationTime > HBO_CONTROL_MENU_TIMEOUT)
+               sendVirtualKeyCode(KBD_TAB, 3);    // wake up the hbo control menu 
+            hboControlActivationTime = irRxTime;
+         }
+         break;
+      default:
+         break;
+   }
+
    switch (cmd->id) {
       case AR_FIRST_REGISTRATION:
          if (displayMode==UNDEFINED) {
@@ -327,7 +345,7 @@ void processClientCmd(QueuedMsg * msg) {
       case ARROW_LEFT:
          // disable surround sound or big/chapter jump back
          if (displayMode == DVR) {
-            switch(appId) {
+            switch(classId) {
                case NETFLIX:
                   // shift-left nine 10 second periods (90)
                   sendVirtualKeyCode(KBD_LEFT_ARROW_SHIFT, 9);
@@ -356,7 +374,7 @@ void processClientCmd(QueuedMsg * msg) {
       case ARROW_RIGHT:
          // enable surround sound or big/chapter jump forward  
          if (displayMode == DVR) {
-            switch(appId) {
+            switch(classId) {
                case NETFLIX:
                   // jump forward nine 10 second periods (90)
                   sendVirtualKeyCode(KBD_RIGHT_ARROW_SHIFT, 9);
@@ -536,7 +554,7 @@ void processClientCmd(QueuedMsg * msg) {
          break;
       case PLAY:
          if (displayMode==DVR) {
-            if (appId==APP_UNKNOWN) {
+            if (classId==APP_UNKNOWN) {
                // explorer window or desktop icon
                refreshEnable=TRUE;
                sendVirtualKeyCode(KBD_ENTER, 1);
@@ -562,7 +580,7 @@ void processClientCmd(QueuedMsg * msg) {
          restoreReceiverState();
          break;
       case REWIND:
-         if (appId == WMC) {             
+         if (classId == WMC) {             
             // ctrl-b four 7 second periods to approximate a 30 second CTRL_F
             sendVirtualKeyCode(KBD_CTRL_B, 2);
          } else {
@@ -571,7 +589,7 @@ void processClientCmd(QueuedMsg * msg) {
          break;   
       case STOP:
          if (displayMode==TV)
-            tvGuide=FALSE;   
+            tvGuide=FALSE;
          sendDefault(cmd);
          break;
       case SURROUND:
@@ -778,7 +796,7 @@ BOOL isAudioFromVideo() {
 void setAudioSource(int videoMode) {
    switch(videoMode) {
       case DVR:
-         sendArCmd(getHostname());
+         sendArCmd(SZ_TV);
          break;
       case TV:
       case DVD:
@@ -1026,7 +1044,32 @@ void processItachCmd() {
 }
 
     
-// return the ID of the foreground window to perform context sensitive
+// return the class id of the foreground window to perform context sensitive
+// operations (e.g. jump forward/back, turn dvd player on, etc.)
+int getForegroundWindowClassID() {
+
+   int i;
+   DWORD pid;
+   HWND hWnd;
+   char windowTitle[1024];
+   
+   if ((hWnd = GetForegroundWindow())!=NULL) {
+      GetWindowTextA(hWnd, windowTitle, sizeof(windowTitle));
+      for (i=0; i<sizeof(appTitle)/sizeof(struct appTitle); i++) {
+         if (strstr(windowTitle, appTitle[i].sz)) {
+            //printf("getForegroundWindow: using \"%s\" context for window \"%s\"\n", appTitle[i].sz, windowTitle);  
+            return appTitle[i].classID;
+         }
+      }      
+   } 
+   else {
+      printf("\nError: getForegroundWindow: window handle not found\n");
+   }       
+   
+   return APP_UNKNOWN;
+}
+
+// return the app id of the foreground window to perform context sensitive
 // operations (e.g. jump forward/back, turn dvd player on, etc.)
 int getForegroundWindowAppID() {
 
@@ -1036,10 +1079,12 @@ int getForegroundWindowAppID() {
    char windowTitle[1024];
    
    if ((hWnd = GetForegroundWindow())!=NULL) {
-      GetWindowText(hWnd, windowTitle, sizeof(windowTitle));
+      GetWindowTextA(hWnd, windowTitle, sizeof(windowTitle));
       for (i=0; i<sizeof(appTitle)/sizeof(struct appTitle); i++) {
-         if (strstr(windowTitle, appTitle[i].sz))
-            return appTitle[i].id;
+         if (strstr(windowTitle, appTitle[i].sz)) {
+            //printf("getForegroundWindow: using \"%s\" context for window \"%s\"\n", appTitle[i].sz, windowTitle);  
+            return appTitle[i].appID;
+         }
       }      
    } 
    else {
@@ -1050,10 +1095,11 @@ int getForegroundWindowAppID() {
 }
 
 
+
 BOOL isVideoPlayerActive() {
-   int appId = getForegroundWindowAppID();
-   return (appId==NETFLIX || appId==VLC ||
-           appId==WMC || appId==YOUTUBE);
+   int classId = getForegroundWindowClassID();
+   return (classId==NETFLIX || classId==VLC ||
+           classId==WMC || classId==YOUTUBE);
 }           
 
 
@@ -1078,7 +1124,7 @@ void setNextForegroundWindow() {
    HWND hWndNext = NULL;
    HWND hWnd = GetTopWindow(NULL);
    HWND hWndFG = GetForegroundWindow();
-   GetWindowText(hWndFG, titleFG, sizeof(titleFG));
+   GetWindowTextA(hWndFG, titleFG, sizeof(titleFG));
    static LinkedList * dwl = NULL;
    
    struct winInfo {
@@ -1091,6 +1137,7 @@ void setNextForegroundWindow() {
       "I:\\Recorded TV",
       "I:\\home\\jhm\\video\\lnk",
       "Windows Media Center",
+      "Max - ",
       "Netflix - ",
       "YouTube - ",
       "youtube.com",
@@ -1107,7 +1154,7 @@ void setNextForegroundWindow() {
    // iterate to refresh the list of matching desktop windows.  If a titles[] 
    // entry partially matches a window title, add that HWND to the dwl list
    while(hWnd) {
-      titleLen = GetWindowText(hWnd, title, sizeof(title));
+      titleLen = GetWindowTextA(hWnd, title, sizeof(title));
       for (i=0; titleLen>0 && i<sizeof(titles)/sizeof(char *); i++) {
          if (strstr(title,titles[i]) && IsWindowVisible(hWnd)) {
             // titles[i] partially matches this HWND's title AND
@@ -1240,7 +1287,7 @@ char * getForegroundWindowImageFileName(char * szProcessName) {
    if (!( (hWnd = GetForegroundWindow()) &&
           (GetWindowThreadProcessId(hWnd, &pid)) &&
           (hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid)) &&
-          (GetProcessImageFileName(hProcess, szProcessName, MAX_PATH)) )) {
+          (GetProcessImageFileNameA(hProcess, szProcessName, MAX_PATH)) )) {
           strcpy(szProcessName, "<unknown>");
    }
 
@@ -1353,8 +1400,10 @@ void sendVirtualKeyCode(unsigned vkCode, int count) {
    int i;
    snprintf(szCount, sizeof(szCount), " %dx", count);
    printf("sendVirtualKeyCode: %s%s\n", vkCodeToSz(vkCode), count>1 ? szCount:"");
-   for (i=0; i<count; i++)
+   for (i=0; i<count; i++) {
       sendVirtualKeyCode(vkCode);
+      //Sleep(50);  // delay to simulate a real key press and release
+   }
 }      
    
 
@@ -1395,7 +1444,7 @@ void sendVirtualKeyCode(unsigned vkPress) {
 
 // use the current foreground window as an index to return the shortcut keycode
 int getVirtualKeyCode(struct rcCmd * cmd) {
-   int winID = getForegroundWindowAppID();
+   int winID = getForegroundWindowClassID();
    
    if (!cmd->shortcut || winID==APP_UNKNOWN && cmd->shortcut->vkCode[1]) {
       // no shortcut OR foreground application unknown for rcCmd's
@@ -1469,11 +1518,15 @@ const char * vkCodeToSz(unsigned vkCode) {
    for (i=0; i<sizeof(rcCmd)/sizeof(struct rcCmd); i++) {
       if (rcCmd[i].shortcut) {
          shortcut * sc = rcCmd[i].shortcut;
-         for (j=0; j<APP_SIZE; j++) {
+         for (j=0; j<CLASS_SIZE; j++) {
             if (sc->vkCode[j]==vkCode)
                return sc->sz[j];
          }
       }         
+   }
+   for (i=0; i<sizeof(vkCodeMap)/sizeof(struct vkCodeMap); i++) {
+     if (vkCodeMap[i].id == vkCode)
+       return vkCodeMap[i].sz;
    }
    return SZ_UNDEFINED;
 }   
@@ -1507,7 +1560,7 @@ const char * remoteModeToSz(int mode) {
 
 
 void errMsgExit(char * msg) {
-   MessageBox(
+   MessageBoxA(
        NULL,
        msg,
        "Launch Video",

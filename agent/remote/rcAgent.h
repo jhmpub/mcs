@@ -4,9 +4,10 @@
 
 // direct zrcc.h to not compile this module as a controller or a target
 #define HOST_CMN TRUE  
-#include "zrcc.h"
+#include "../../common/rti/zrcc.h"
 
 #define VIDEO_POWER_ON_DELAY 4000   // milliseconds
+#define HBO_CONTROL_MENU_TIMEOUT 5000 // milliseconds
 #define SZ_VIDEO_DEFAULT_MASTER_VOLUME "44"
 #define VIDEO_INPUT_MENU MODE
 
@@ -1132,6 +1133,20 @@ static struct socketDescriptor itachSd = {
    "itach"
 };
 
+static const char * appIdSz[] = {
+  "netflix ",
+  "vlc ",
+  "wmc ",
+  "youtube ",
+  "class size ",
+  "hbo max ",
+  "peacock ",
+  "prime ",
+  "silverlight ",
+  "xfinity ",
+  "app unknown "
+};
+
 const char * tira_dll_absolute_path = "c:\\utils\\startup\\local\\rcagent\\tira2.dll";
 
 BOOL forceForegroundWindow(HWND);
@@ -1146,6 +1161,7 @@ DWORD videoModeChangeThread(LPVOID);
 int __stdcall irRxCmdCallback(char const *);
 int filterCmd(int);
 int getForegroundWindowAppID(void);
+int getForegroundWindowClassID(void);
 int getVirtualKeyCode(struct rcCmd *);
 int cmdSzToRcCmdId(const char *);
 int getRemoteMode(void);

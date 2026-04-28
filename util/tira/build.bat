@@ -23,7 +23,7 @@ set LIBS=-lstdc++
 set OBJ=demo.o common.o
 set BIN=%PROGRAM_DRIVE%\pkg\win32\mingw\bin
 %BIN%\gcc -c -g %INC% demo.cpp
-%BIN%\gcc -c -g -DCONSOLE_MODE %CMN%\common.cpp
+%BIN%\gcc -c -g -o common.o -DCONSOLE_MODE %INC% %CMN%\common.cpp
 %BIN%\gcc -static -o demo %OBJ% %LIBS%
 
 :DONE

@@ -24,8 +24,9 @@ set LIBS=-lstdc++ -lws2_32
 set OBJ=demo.o common.o socket.o
 set BIN=%PROGRAM_DRIVE%\pkg\win32\mingw\bin
 %BIN%\gcc -c -g %INC% demo.cpp
-%BIN%\gcc -c -g %CMN%\socket.cpp
-%BIN%\gcc -c -g -DCONSOLE_MODE %CMN%\common.cpp
+
+%BIN%\gcc -c -g -o socket.o %INC% %CMN%\socket.cpp
+%BIN%\gcc -c -g -o common.o -DCONSOLE_MODE %INC% %CMN%\common.cpp
 %BIN%\gcc -static -o demo %OBJ% %LIBS%
 
 :DONE

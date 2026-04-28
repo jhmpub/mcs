@@ -4,7 +4,7 @@
 #ifdef __CYGWIN__
 #define _WIN32  // override __unix__ directive in rti.h
 #endif
-#include <rti.h>
+#include "./include/rti.h"
 
 #define RTI_VENDOR_COMCAST       0x109D
 #define RTI_PROFILE_RF4CE_MSO    0xC0

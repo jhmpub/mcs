@@ -346,8 +346,8 @@ void loadTiraDll() {
    const char * dll;
    
    const DWORD SZLEN = 256;
-   TCHAR tira_dll_cwd[SZLEN];
-   GetCurrentDirectory(SZLEN, tira_dll_cwd);
+   char tira_dll_cwd[SZLEN];
+   GetCurrentDirectory(SZLEN, (LPTSTR) tira_dll_cwd);
    strcat(tira_dll_cwd,"\\");
    strcat(tira_dll_cwd, TIRA_DLL);
    
@@ -362,7 +362,7 @@ void loadTiraDll() {
    else 
       dll = TIRA_DLL;
    
-   if ( !(tiraDLL=LoadLibrary(dll)) )
+   if ( !(tiraDLL=LoadLibraryA(dll)) )
       printLoadTiraDllErrorAndExit("LoadLibrary(Tira2.dll)");
       
    if ( !(tira_init = (tira_init_t) GetProcAddress(tiraDLL , "tira_init")) )
@@ -407,7 +407,7 @@ void unloadTiraDll() {
 
 
 void createProcess(const char * exeFile, const char * arg) {
-   STARTUPINFO si;
+   STARTUPINFOA si;
    PROCESS_INFORMATION pi;
    memset(&si,0,sizeof(si));
    si.cb = sizeof(si);
@@ -424,9 +424,9 @@ void createProcess(const char * exeFile, const char * arg) {
    strcat(cmdLine," ");
    strcat(cmdLine,arg);
    
-   if ( !CreateProcess( 
+   if ( !CreateProcessA( 
           NULL,                // executable file (white space supported)
-          cmdLine,             // exe with arguments (no white space in exe argument)
+          cmdLine,    // exe with arguments (no white space in exe argument)
           NULL,                // Process handle not inheritable
           NULL,                // Thread handle not inheritable
           FALSE,               // Set handle inheritance to FALSE
@@ -488,7 +488,7 @@ HWND findWindow(const char * sz) {
    HWND hWnd = GetTopWindow(NULL);
    while(hWnd) {
       hWnd = GetNextWindow(hWnd, GW_HWNDNEXT);
-      if (GetWindowText(hWnd, windowTxt, sizeof(windowTxt)) && 
+      if (GetWindowTextA(hWnd, windowTxt, sizeof(windowTxt)) && 
           strstr(szToLower(windowTxt), title))
          return hWnd;
    }
@@ -823,8 +823,8 @@ void dispatchThread() {
     
     // window created is invisible window without 
     // WS_VISIBLE ORd into the 4th argument
-   HWND myDialog = CreateWindowEx(
-      0,WC_DIALOG,"rcClient Dispatch Thread",WS_OVERLAPPEDWINDOW,
+   HWND myDialog = CreateWindowExA(
+      0,(LPCSTR)WC_DIALOG,"rcClient Dispatch Thread",WS_OVERLAPPEDWINDOW,
       400,100,200,200,NULL,NULL,NULL,NULL
    );
     

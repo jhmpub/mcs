@@ -10,6 +10,7 @@
 // 12 left or right arrows for YOUTUBE
 #define  KBD_SHIFT_N           0x4E10   // Menu -> VLC next chapter 
 #define  KBD_SHIFT_P           0x5010   // Menu <- VLC previous chapter
+#define  KBD_SHIFT_TAB         0x0910   // " -> PEACOCK set play / pause focus 
                                         // 
 #define  KBD_CTRL_B            0x4211   // << -> WMC 7 seconds back
 #define  KBD_LEFT_ARROW        0x0025   // << -> YOUTUBE 5 seconds back
@@ -24,7 +25,10 @@
 #define  KBD_RIGHT_ARROW_SHIFT 0x2710   // << -> NETFLIX 10 seconds forward
                                         // 
 #define  KBD_CTRL_P            0x5011   // > or " WMC play/pause
+#define  KBD_CTRL_W            0x5711   // Stop -> Ctrl-W
 #define  KBD_SPACE             0x0020   // > or " NETFLIX, VLC, YOUTUBE play/pause
+#define  KBD_TAB               0x0009   // " HBOMAX 5 tabs to highlight > / "
+#define  KBD_ESC               0x001B   // " HBOMAX exit control panel
                                         // 
 #define  KBD_ALT_TAB           0x0912   // VCR Menu -> Alt-Tab
 #define  KBD_ARROW_DOWN        0x0028   // Down Menu Arrow -> Down Keyboard Arrow
@@ -47,6 +51,7 @@
 
 #define  SZ_KBD_SHIFT_N             "shift n "
 #define  SZ_KBD_SHIFT_P             "shift p"
+#define  SZ_KBD_SHIFT_TAB           "shift tab"
                                     
 #define  SZ_KBD_CTRL_B              "ctrl b"
 #define  SZ_KBD_LEFT_ARROW          "left arrow"
@@ -61,7 +66,10 @@
 #define  SZ_KBD_RIGHT_ARROW_SHIFT   "shift right arrow"
                                
 #define  SZ_KBD_CTRL_P              "ctrl p"
+#define  SZ_KBD_CTRL_W              "ctrl w"
 #define  SZ_KBD_SPACE               "space"
+#define  SZ_KBD_TAB                 "tab"
+#define  SZ_KBD_ESC                 "esc"
                                
 #define  SZ_KBD_ALT_TAB             "alt tab"
 #define  SZ_KBD_ARROW_DOWN          "arrow down"
@@ -87,24 +95,43 @@ enum appID {
    VLC,
    WMC,
    YOUTUBE,  // nb click once on a running video to pause and set hotkey focus
-   APP_SIZE,
+   CLASS_SIZE,
+   HBOMAX,
+   PEACOCK,  // same YOUTUBE play / pause issue
+   PRIME,
+   SILVERLIGHT,
+   XFINITY,
    APP_UNKNOWN
 };
 
+            // peacock app hack
+            // a real spacebar keypress toggles the play / pause toggle 
+            // regardless of the current focus
+            // a virtual spacebar keypress executes the highlighted control
+            // reset control focus from the initial fullscreen / multiwindow
+            // toggle to the play / pause toggle
+
+
 struct appTitle {
     const char * sz;
-    int id;
+    int classID;      // virtualKey struct default shortcut index (e.g. space to pause)
+    int appID;        // processClientCmd app specific shortcut (e.g. 5 tabs + space to pause)
 } appTitle[] = {    
-   { "Netflix - ", NETFLIX },
-   { "Microsoft Silverlight", NETFLIX },
-   { "Peacock", NETFLIX },
-   { "Prime Video", NETFLIX },
-   { "Xfinity Stream", NETFLIX },  // sm jmp fwd 30 sec, sm jmp back 15 sec
-   { "VLC media player", VLC },
-   { "Windows Media Center", WMC },
-//   { "YouTube - ", YOUTUBE },
-   { "youtube.com", YOUTUBE },
-   { " - Google Chrome", YOUTUBE } // default to YOUTUBE for chrome browser
+   //{ "CBS News", NETFLIX },
+   { "Max - ", NETFLIX, HBOMAX },
+   { "Netflix - ", NETFLIX, NETFLIX },
+   { "Microsoft Silverlight", NETFLIX, SILVERLIGHT },
+   { "Prime Video", NETFLIX, PRIME },
+   { "Xfinity Stream", NETFLIX, XFINITY },  // sm jmp fwd 30 sec, sm jmp back 15 sec
+   { "VLC media player", VLC, VLC },
+   { "Windows Media Center", WMC, WMC },
+   { "youtube.com", YOUTUBE, YOUTUBE },
+
+   // default to YOUTUBE for a chrome browser 
+   // nb click pause once on a running video to set hotkey focus 
+   // for remote virtual spacebar pause / play
+   // YOUTUBE appID works for Peacock, CBS News, etc.
+   { " - Google Chrome", YOUTUBE, APP_UNKNOWN } 
 }; 
 
 enum vkCodeId {
@@ -135,8 +162,8 @@ enum vkCodeId {
 };   
    
 struct shortcut {
-   unsigned vkCode[APP_SIZE];    // indexed by appID enum
-   const char * sz[APP_SIZE];    // debug description
+   unsigned vkCode[CLASS_SIZE];    // indexed by appID enum
+   const char * sz[CLASS_SIZE];    // debug description
 };   
 
 static struct virtualKey {
@@ -259,8 +286,18 @@ static struct virtualKey {
    {
       SC_ALT_F4,
       {
-         {KBD_ALT_F4,0,0,0}, 
-         {SZ_KBD_ALT_F4,NULL,NULL,NULL}
+         {
+		    KBD_CTRL_W,
+		    KBD_ALT_F4,
+		    KBD_ALT_F4,
+		    KBD_CTRL_W
+		 }, 
+         {
+		    SZ_KBD_CTRL_W,
+		    SZ_KBD_ALT_F4,
+		    SZ_KBD_ALT_F4,
+		    SZ_KBD_CTRL_W
+		 }
       }
    },
    {
@@ -355,4 +392,17 @@ static struct virtualKey {
       }   
    }
 };   
+
+
+// keys for explicit app commands as
+// opposed to general class commands
+// used by NETFLIX, VLC, WMC and YOUTUBE
+static struct vkCodeMap {
+  int id;
+  const char * sz;
+} vkCodeMap[]  = {
+  { KBD_ESC, SZ_KBD_ESC },
+  { KBD_SHIFT_TAB, SZ_KBD_SHIFT_TAB },
+  { KBD_TAB, SZ_KBD_TAB }
+};
 

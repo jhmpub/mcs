@@ -8,58 +8,62 @@
 //
 // 2004 Aug  7 jhm original creation
 // 2016 Jun 29 jhm converted messaging from UDP to TCP for smart remote 
-//             functionality 
+//                 functionality 
+// 2026 Apr 11 jhm added support for a Home Theater PC (HTPC) connected to 
+//                 an LG TV
 
 import java.awt.*;
 import java.awt.event.*;
+import javax.imageio.ImageIO;
 import java.io.*;
 import java.lang.Math;
 import java.net.*;
-import javax.swing.JButton;
-import javax.swing.JFrame;
-import javax.swing.BorderFactory; 
+
 import javax.swing.border.*;
 import javax.swing.*;
 import javax.swing.event.*;
+import javax.swing.plaf.basic.BasicSliderUI;
 import java.util.*;
 
 public class AcClient extends JFrame
                         implements ActionListener, WindowListener {
                       
     private static String agentHostname = "jimson";
-    //private static final String agentHostname = "georgia";
     private static final int AUDIO_CONTROL_PORT = 2200;
     
-    // computerSources hosts have a digital audio output link into the amplifier
+    // computerSources have a digital audio output link into the amplifier
     protected ArrayList<String> computerSources = 
-        new ArrayList<String>(Arrays.asList("georgia","jimson","lvr-mm","den-mm"));
-    // HTPC hosts default to front speakers on, rear speakers off    
-    protected ArrayList<String> htpcSources = 
-        new ArrayList<String>(Arrays.asList("lvr-mm","den-mm"));
+        new ArrayList<String>(Arrays.asList("georgia","jimson","lvr-mm"));
+
+    String localHostname = GlobalUtilities.GetLocalHostname();
+    // front speakers on, rear speakers off, tv source
+    protected boolean isHTPC =  localHostname.equals("lvr-mm");
+    // power on/off an lg tv connected to this host
+    protected boolean isLGTV =  localHostname.equals("lvr-mm");   
+
     protected static boolean isSurroundOption;
     protected static boolean restoreReceiverStatePending=false;
     protected static String applicationName;
     protected RxClient rxClient;
     protected TcpConnection arAgent = new TcpConnection(agentHostname, AUDIO_CONTROL_PORT);
-    String localHostname = GlobalUtilities.GetLocalHostname();
-    
+    double screenResolution = Toolkit.getDefaultToolkit().getScreenSize().getWidth();
+    protected int scale = screenResolution >= 3840 ? 3 : screenResolution >= 2880 ? 2:1;
+    protected int fontSize = 12 * scale; 
     protected ArrayList<JButton> fmButtons = new ArrayList<JButton>();
     protected ArrayList<JButton> inputButtons = new ArrayList<JButton>();
     protected ArrayList<JButton> surroundButtons = new ArrayList<JButton>();
-    
     protected ArrayList<ArCmd> arCmdList = new ArrayList<ArCmd>();
     Container pane = getContentPane();
     GridBagLayout layout = new GridBagLayout();
     GridBagConstraints constraints = new GridBagConstraints();
-    
+
     public AcClient(String applicationName) {
         
         super(applicationName);
-        setSize(400, 500);
-        
+        setSize(400 * scale, 500 * scale);
         pane.setLayout(layout);
         constraints.fill = GridBagConstraints.BOTH;  // enable x and y sizing
-        
+
         if (isSurroundOption) {
             initSurroundPanel();
         } else {
@@ -74,16 +78,21 @@ public class AcClient extends JFrame
 
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         addWindowListener(this);
-        
+
         rxClient = new RxClient();
         rxClient.start();   // start the thread to receive messages
 
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            public void run() {
+                shutdown(new Exception("Shutdown called"));
+            }
+        });
     }
     
     private void initAudioPanel() {
         setIconImage(Toolkit.getDefaultToolkit().getImage("audio.jpg"));
-		  // manully tune to station
-		  // store: MEMORY (flash), PRESET / TUNING (1/8), MEMORY (locks station)
+        // manully tune to station
+        // store: MEMORY (flash), PRESET / TUNING (1/8), MEMORY (locks station)
         createArCmdGrouped(0,  0, 1, 1, 1, 1, "KQED",  "fm1", fmButtons);     // A1 88.3
         createArCmdGrouped(1,  0, 1, 1, 1, 1, "89.9",  "fm2", fmButtons);     // A2 89.9
         createArCmdGrouped(2,  0, 1, 1, 1, 1, "KRCB",  "fm3", fmButtons);     // A3 90.9
@@ -95,8 +104,8 @@ public class AcClient extends JFrame
         
         createArCmdGrouped(0,  1, 2, 2, 1, 2, "Computer", localHostname, inputButtons);
         createArCmdGrouped(2,  1, 2, 2, 1, 2, "Radio", "fm", inputButtons);
-        createArCmdGrouped(4,  1, 2, 2, 1, 2, "TV", "tv", inputButtons);
-        createArCmdGrouped(6,  1, 2, 2, 1, 2, "DVD", "dvd", inputButtons);
+        createArCmdGrouped(4,  1, 2, 2, 1, 2, "DVD", "dvd", inputButtons);
+        createArCmdGrouped(6,  1, 2, 2, 1, 2, "TV", "tv", inputButtons);
         
           createArCmdOnOff(0,  3, 4, 2, 1, 2, "Computer Speakers", "rear speakers");
           createArCmdOnOff(4,  3, 4, 2, 1, 2, "Living Room Speakers", "front speakers");
@@ -123,10 +132,11 @@ public class AcClient extends JFrame
         
         createArCmdGrouped(0,  0, 1, 1, 1, 1, "G", "georgia", inputButtons);
         createArCmdGrouped(1,  0, 1, 1, 1, 1, "J", "jimson", inputButtons);
-        createArCmdGrouped(2,  0, 1, 1, 1, 1, "TV", "tv", inputButtons);
+        // TV not a video source
+        // createArCmdGrouped(2,  0, 1, 1, 1, 1, "TV", "tv", inputButtons);
         createArCmdGrouped(3,  0, 1, 1, 1, 1, "DVD", "dvd", inputButtons);
-        createArCmdGrouped(4,  0, 1, 1, 1, 1, "LMM", "lvr-mm", inputButtons);
-        createArCmdGrouped(5,  0, 1, 1, 1, 1, "DMM", "den-mm", inputButtons);
+        // TV extracts audio from LMM's HDMI and sends it over toslink to AV receiver
+        createArCmdGrouped(4,  0, 1, 1, 1, 1, "TV", "tv", inputButtons);
         
         createArCmdGrouped(0,  1, 2, 2, 1, 1, "Min", "surround min", surroundButtons);
         createArCmdGrouped(2,  1, 2, 2, 1, 1, "Std", "surround std", surroundButtons);
@@ -161,7 +171,8 @@ public class AcClient extends JFrame
         Math.max(0,(screenSize.height-windowSize.height)/2));
         frame.setVisible(true);
     }
-    
+
+
     // add an ArCmd button to a group without adding it to the pane
     private void createArCmdGrouped(String buttonName,
                                     String cmdSz,
@@ -176,9 +187,9 @@ public class AcClient extends JFrame
     private void createArCmdGrouped(ArrayList<String> buttonNames, 
                                     String excludeName,
                                     ArrayList<JButton> buttonGroup) {
-        Iterator itr = buttonNames.iterator();
+        Iterator<String> itr = buttonNames.iterator();
         while(itr.hasNext()) {
-            String buttonName = (String) itr.next();
+            String buttonName = itr.next();
             if (!buttonName.equals(excludeName)) {
                 createArCmdGrouped(buttonName, buttonName, buttonGroup);
             }
@@ -201,12 +212,14 @@ public class AcClient extends JFrame
         arCmdList.add(new ArCmdGrouped(button, buttonGroup, arAgent));
     }
     
+/*
     private void createArCmdOnOff(String buttonName,
                                   String cmdSz) {
         JButton button = new JButton(buttonName);
         button.setActionCommand(cmdSz);
         arCmdList.add(new ArCmdOnOff(button, arAgent));
-    }    
+    }
+*/    
                                             
     private void createArCmdOnOff(int gridX, 
                                   int gridY, 
@@ -231,6 +244,7 @@ public class AcClient extends JFrame
                               String buttonName,
                               String cmdSz) {
         JButton button = new JButton(buttonName);
+        button.setFont(new Font("Arial", Font.BOLD, fontSize));
         constraints.gridx = gridX;
         constraints.gridy = gridY;
         constraints.gridwidth = gridWidth;
@@ -243,12 +257,13 @@ public class AcClient extends JFrame
         return button;
     }
     
-    private JSlider arSlider(String cmdSz, int rangeEnd) {    
+    private JSlider arSlider(String cmdSz, int rangeEnd) {
         JSlider slider = new JSlider(JSlider.HORIZONTAL, 0, rangeEnd, 0);
-	    slider.getAccessibleContext().setAccessibleName(cmdSz);
-        return slider;
-    }    
-    
+        slider.setUI(new ArSliderUI(slider, scale));
+        slider.getAccessibleContext().setAccessibleName(cmdSz);
+        return slider;        
+    }        
+
     private void createArCmdSlider(int gridX, 
                                    int gridY, 
                                    int gridWidth, 
@@ -261,13 +276,24 @@ public class AcClient extends JFrame
                                    int majorTickSpacing,
                                    int rangeEnd) {
                                    
-        JSlider slider = arSlider(cmdSz, rangeEnd);                      
+        JSlider slider = arSlider(cmdSz, rangeEnd);
+        TitledBorder titledBorder;
+        Color steelBlue = new Color(231, 238, 246);
+        slider.setBackground(steelBlue);
+        slider.setFont(new Font("Arial", Font.BOLD, fontSize));
+        titledBorder = BorderFactory.createTitledBorder(
+            BorderFactory.createLineBorder(Color.BLACK),
+            sliderName,
+            TitledBorder.DEFAULT_JUSTIFICATION,
+            TitledBorder.DEFAULT_POSITION,
+            new Font("Arial", Font.BOLD, fontSize)
+        );
         slider.setMajorTickSpacing(majorTickSpacing);
         slider.setMinorTickSpacing(1);
         slider.setPaintTicks(true);
         slider.setPaintLabels(true);
         slider.addChangeListener(new SliderListener());
-	    slider.setBorder(new TitledBorder(sliderName));
+        slider.setBorder(titledBorder);
         slider.setEnabled(false);
         
         constraints.gridx = gridX;
@@ -285,11 +311,9 @@ public class AcClient extends JFrame
     
     // this function depends on an external executable, setForegroundWindow.exe
     // that must reside in the environment's search path
-    private static void exitIfAlreadyRunning() {
-    
+    private static void exitIfAlreadyRunning() { 
         try {
-            Process p = Runtime.getRuntime().exec(
-                "setForegroundWindow.exe " + "\"" + applicationName + "\"");
+            Process p = (new ProcessBuilder("setForegroundWindow.exe", applicationName)).start();
             p.waitFor();                                      
             if (p.exitValue()==0) {                                      
                 System.out.println(
@@ -305,7 +329,45 @@ public class AcClient extends JFrame
                 System.exit(0);
         }                       
     }
-    
+
+    // this function depends on an external executable, isRunning.exe
+    // that must reside in the environment's search path
+    // return true if windowTitle is running
+    private static boolean isRunning(String windowTitle) { 
+        boolean found=false;
+        try {
+            Process p = (new ProcessBuilder("isRunning.exe", windowTitle)).start();
+            p.waitFor();
+            found = p.exitValue()==1 ? true : false;                           
+        } catch (Exception e) {
+            GlobalUtilities.DialogAndStdErrMsg(
+                "Error", 
+                "AcClient::isRunning: exec failed",
+                e.toString());
+                System.exit(0);
+        }               
+        return found;  
+    }    
+
+    // this function depends on an external executable, lgtv_gui.exe
+    // that must reside in the environment's search path
+    private static void lgtvPower(String toState) {   
+        try { 
+            Process p = (new ProcessBuilder("lgtv_gui.exe", "--ssl", toState)).start();
+             p.waitFor();       
+            System.out.println(
+                "AcClient::lgtvPower: tv " + toState  + 
+                  (p.exitValue()==0 ? "" : "\nerrno " + p.exitValue() + "\n")
+            );
+        } catch (Exception e) {
+            GlobalUtilities.DialogAndStdErrMsg(
+                "Error", 
+                "AcClient::lgtvPower: cmd failed",
+                e.toString());
+                System.exit(0);
+        }                       
+    }
+
     class SliderListener implements ChangeListener {
         public void stateChanged(ChangeEvent event) {
             JSlider volumeSlider = (JSlider) event.getSource();
@@ -329,10 +391,10 @@ public class AcClient extends JFrame
     
     private ArCmd findArCmd(String cmd) {
         ArCmd arCmd;
-        Iterator itr = arCmdList.iterator();
+        Iterator<ArCmd> itr = arCmdList.iterator();
         // search for an exact match
         while (itr.hasNext()) {
-            arCmd = (ArCmd) itr.next();
+            arCmd = itr.next();
             if (arCmd.sz.equals(cmd)) {
                 return arCmd;
             }     
@@ -346,15 +408,15 @@ public class AcClient extends JFrame
                 return arCmd;
             }     
         }
-        // System.out.println("findArCmd not found: " + cmd);
+        //System.out.println("findArCmd not found: " + cmd);
         return null;
     }
     
     private void restoreReceiverGroup(ArrayList<JButton> buttonGroup) {
         JButton button;
-        Iterator itr = buttonGroup.iterator();
+        Iterator<JButton> itr = buttonGroup.iterator();
         while (itr.hasNext()) {
-            button = (JButton) itr.next();
+            button = itr.next();
             findArCmd(button.getActionCommand()).resend();
         }
     }    
@@ -380,33 +442,60 @@ public class AcClient extends JFrame
     
     private void setEnabledDspControls(boolean state) {
         ArCmd arCmd;
-        Iterator itr = arCmdList.iterator();
+        Iterator<ArCmd> itr = arCmdList.iterator();
         while (itr.hasNext()) {
-            arCmd = (ArCmd) itr.next();
+            arCmd = itr.next();
             arCmd.setEnabledDspControl(state);
         }
     }
-    
-    private void arAgentClose() {
-        if (!arAgent.socket.isClosed()) {
+
+    // override BasicSliderUI methods to scale a slider control knob thumb 
+    private class ArSliderUI extends BasicSliderUI {
+        protected class Thumb {
+            protected Image image;
+            protected int scale = 1;
+            private final int width1x = 26;
+            private final int height1x = 22;
+            protected int width() {return width1x * scale;}
+            protected int height() {return height1x * scale;}
+            protected String filename() {return "thumb_" + thumb.scale + "x.png";} 
+        }
+        private Thumb thumb = new Thumb();
+
+        public ArSliderUI(JSlider slider, int scale) {
+            super(slider);
+            thumb.scale = scale;
             try {
-                System.out.print("Closing agent connection...");
-                arAgent.socket.close();
-                System.out.println("done");
-                arAgent.wasConnected=true;
-            } catch (IOException e) {
+                thumb.image = ImageIO.read(new File(thumb.filename()));
+            } catch (IOException e) { 
                 GlobalUtilities.DialogAndStdErrMsg(
                    "Error", 
-                   "AcClient::arAgentClose failed",
-                   e.toString());
-            }
+                   "ArSliderUI::ArSliderUI: " + thumb.filename() + " file not found",
+                   e.toString()
+                );
+            }                
         }
-    }        
+
+        @Override
+        public void paintThumb(Graphics g) {
+            Rectangle rect = thumbRect;
+            g.drawImage(thumb.image, rect.x, rect.y, rect.width, rect.height, null);
+        }
+
+        @Override
+        protected void calculateThumbSize() {
+            super.calculateThumbSize();
+            thumbRect.setSize(thumb.width(), thumb.height());
+        }
+    }
+
     
+    //  
     private class RxClient extends Thread {
     
         String msg;
         boolean firstRegistration = false;
+        boolean isRunning = true;
         ArCmd arCmd;
         
         public RxClient() {
@@ -415,10 +504,10 @@ public class AcClient extends JFrame
         }
         
         private void enableControls(boolean state) {
-            Iterator itr = arCmdList.iterator();
+            Iterator<ArCmd> itr = arCmdList.iterator();
             ArCmd arCmd;
             while (itr.hasNext()) {
-                arCmd = (ArCmd) itr.next();
+                arCmd = itr.next();
                 if (arCmd.label().equals("Power")) {
                     arCmd.setEnabled(true);
                 } else if (arCmd.label().equals("Computer")) {
@@ -428,12 +517,13 @@ public class AcClient extends JFrame
                 }
             }
         }                
-        
+
+        // async thread to receive and process messages from the audio receiver agent
         public void run() {
         
             System.out.println("RxClient running");
             
-            while(true) {
+            while(isRunning) {
                 
                 if (arAgent.isConnected()) {
             
@@ -465,15 +555,26 @@ public class AcClient extends JFrame
                         }
                             
                         if (msg.equals("audio power on")) {
+                            ArCmdSlider centerVolume = (ArCmdSlider) findArCmd("center volume");
+                            if (isLGTV)
+                                lgtvPower("on");                            
                             if (firstRegistration &&
                                 isComputerSourceCandidate(localHostname)) {
-                                findArCmd(localHostname).send();
-                                findArCmd("rear speakers").send(isHTPC() ? "off" : "on");
-                                findArCmd("front speakers").send(isSurroundOption || isHTPC() ? "on" : "off");
-                                ArCmdSlider mv = (ArCmdSlider) findArCmd("master volume");
-                                if (mv.slider.getValue() > 40) {
-                                    mv.send(40);
-                                }    
+                                findArCmd(isHTPC ? "tv" : localHostname).send();
+                                findArCmd("rear speakers").send(isSurroundOption ? "on" : isHTPC ? "off" : "on");
+                                findArCmd("front speakers").send(isSurroundOption || isHTPC ? "on" : "off");
+                                ArCmdSlider masterVolume = (ArCmdSlider) findArCmd("master volume");
+                                if (isHTPC) {
+                                    masterVolume.send(45);
+                                } else if (masterVolume.slider.getValue() > 40) {
+                                    masterVolume.send(40);
+                                }
+                                centerVolume.send(isHTPC && isSurroundOption ? 20 : 15);
+                            } else if (isSurroundOption) {
+                                findArCmd("rear speakers").send("on");
+                                findArCmd("front speakers").send("on");
+                                if (isHTPC)
+                                   centerVolume.send(20);
                             }    
                             firstRegistration = false;
                             enableControls(true);
@@ -482,6 +583,8 @@ public class AcClient extends JFrame
                             enableControls(true);
                         }    
                         else if (msg.equals("audio power off")) {
+                            if (isLGTV)
+                                lgtvPower("off");                                         
                             enableControls(false);
                         }  
                         else if (msg.equals("first registration")) {
@@ -493,6 +596,7 @@ public class AcClient extends JFrame
                         }           
                             
                     } else {
+                        // end of message stream
                         arAgent.close();
                         enableControls(false);
                         restoreReceiverStatePending = true;
@@ -515,7 +619,7 @@ public class AcClient extends JFrame
         }               
                      
         private boolean isComputerSourceCandidate(String hostname) {
-            Iterator itr = computerSources.iterator();
+            Iterator<String> itr = computerSources.iterator();
             while(itr.hasNext()) {
                 if (itr.next().equals(hostname)) {
                     return true;
@@ -523,17 +627,7 @@ public class AcClient extends JFrame
             }        
             return false;
         }    
-                        
-        private boolean isHTPC() {
-            Iterator itr = htpcSources.iterator();
-            while(itr.hasNext()) {
-                if (itr.next().equals(localHostname)) {
-                    return true;
-                }
-            }        
-            return false;
-        }    
-        
+
         private void sleep(int ms) {
             try {
                 Thread.sleep(ms);
@@ -541,6 +635,19 @@ public class AcClient extends JFrame
         }        
     }            
     
+    private void shutdown(Exception e) {
+        if (arAgent.isConnected())
+            findArCmd("deregister").send();
+        if (isLGTV &&
+            !isRunning(isSurroundOption ? "Audio Control" : "Surround Control")) {
+            // this host is connected to an LG TV AND
+            // this is the only control program running
+            lgtvPower("off");
+        }    
+        arAgent.close();
+        rxClient.isRunning = false;
+    }
+
     public void windowClosed (WindowEvent e) {}
     public void windowOpened (WindowEvent e) {}
     public void windowDeiconified (WindowEvent e) {}
@@ -548,9 +655,8 @@ public class AcClient extends JFrame
     public void windowDeactivated (WindowEvent e) {}
     public void windowActivated (WindowEvent e) {}
     public void windowClosing(WindowEvent e) {
-        if (arAgent.isConnected()) {
-            findArCmd("deregister").send();
-        }    
+        if (arAgent.isConnected())
+            findArCmd("deregister").send(); 
         arAgent.close();
         System.exit(0);
     }
@@ -724,7 +830,6 @@ class ArCmdOnOff extends ArCmd {
 class ArCmdGrouped extends ArCmd {
 
     private JButton button;
-    private Border border;
     protected ArrayList<JButton> group;
 
     public ArCmdGrouped(JButton button, ArrayList<JButton> group, TcpConnection arAgent) {
@@ -735,10 +840,10 @@ class ArCmdGrouped extends ArCmd {
     } 
     
     protected void processAgentNotification(String msg) { 
-        Iterator itr = group.iterator();
+        Iterator<JButton> itr = group.iterator();
         JButton button;
         while (itr.hasNext()) {
-            button = (JButton) itr.next();
+            button = itr.next();
             if (msg.equals(button.getActionCommand())) {
                  button.setBorder(borderOn);
             } else {    
@@ -768,7 +873,9 @@ class ArCmdSlider extends ArCmd {
     public ArCmdSlider(JSlider slider, TcpConnection arAgent) {
         super(slider.getAccessibleContext().getAccessibleName(), arAgent);
         this.slider = slider;
-    }    
+    }
+    
+    protected String label() { return slider.getAccessibleContext().getAccessibleName(); }
     
     protected void processAgentNotification(String msg) { 
         slider.setEnabled(true);
@@ -848,5 +955,9 @@ class ArCmd {
     protected void send(int volume) {}
     protected void send(String operand) {}
     protected String label() { return ""; }
-}    
+}
+
+
+
+
 
