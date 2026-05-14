@@ -31,7 +31,10 @@
  *                 coordination and command serialization
  * 2019 Feb 21 jhm rewrote dsp initialization and configuration routines
  *                 to optimize settings for stereo and surround sound 
- *                 media based on input source 
+ *                 media based on input source
+ * 2026 May 08 jhm added a "tv power off" message that gets broadcasted
+ *                 to all registered audio clients to support turning
+ *                 tv power on and off from a remote host
  *
  * Notes:
  * Use build.bat to build console and daemon process executables
@@ -344,6 +347,10 @@ void irSend(QueuedMsg * msg) {
                 sendMsg(msg->sd, tiraCmdIdToSz(audioPowerState));
             }    
             break;
+        case TV_POWER_OFF:
+            broadcastMsg(SZ_TV_POWER_OFF);
+        case TV_POWER_ON:
+            break;    
         case EXIT_PROCESS:
             if (exiting) {
                printf("\nExit previously requested, forcing exit\n");

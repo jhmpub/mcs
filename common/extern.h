@@ -47,6 +47,10 @@
 #define SZ_SURROUND_STD              "surround std"
 #define SZ_SURROUND_MAX              "surround max"
 
+// audio client command messages
+#define SZ_TV_POWER_ON               "tv power on"
+#define SZ_TV_POWER_OFF              "tv power off"
+
 // ir and zigbee remote control command messages
 #define SZ_ARROW_DOWN                "arrow down"
 #define SZ_ARROW_LEFT                "arrow left"

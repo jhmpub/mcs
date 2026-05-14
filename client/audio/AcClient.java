@@ -42,6 +42,7 @@ public class AcClient extends JFrame
     protected boolean isLGTV =  localHostname.equals("lvr-mm");   
 
     protected static boolean isSurroundOption;
+    protected static boolean isToggleOption;
     protected static boolean restoreReceiverStatePending=false;
     protected static String applicationName;
     protected RxClient rxClient;
@@ -160,7 +161,10 @@ public class AcClient extends JFrame
     }       
     
     public static void main(String[] args) {
-        isSurroundOption = (args.length>0 && args[0].equals("-s")) ? true : false;
+        isSurroundOption = (args.length>0 && args[0].equals("-s") || 
+                            args.length>1 && args[1].equals("-s")) ? true : false;
+        isToggleOption = (args.length>0 && args[0].equals("-t") || 
+                          args.length>1 && args[1].equals("-t")) ? true : false;
         applicationName = 
             isSurroundOption ? "Surround Control" : "Audio Control";
         exitIfAlreadyRunning();
@@ -169,6 +173,10 @@ public class AcClient extends JFrame
         Dimension windowSize = frame.getSize();
         frame.setLocation(Math.max(0,(screenSize.width - windowSize.width)/2), 
         Math.max(0,(screenSize.height-windowSize.height)/2));
+        if (isToggleOption) {
+            frame.setState(JFrame.ICONIFIED); // run minimized
+            isToggleOption = false;  // clear for a "tv power off" toggle
+        }    
         frame.setVisible(true);
     }
 
@@ -569,7 +577,8 @@ public class AcClient extends JFrame
                                 } else if (masterVolume.slider.getValue() > 40) {
                                     masterVolume.send(40);
                                 }
-                                centerVolume.send(isHTPC && isSurroundOption ? 20 : 15);
+                                if (isSurroundOption)
+                                   centerVolume.send(isHTPC ? 20 : 15);
                             } else if (isSurroundOption) {
                                 findArCmd("rear speakers").send("on");
                                 findArCmd("front speakers").send("on");
@@ -593,8 +602,10 @@ public class AcClient extends JFrame
                             setEnabledDspControls(false);
                         } else if (msg.equals("dsp effect on")) {
                             setEnabledDspControls(true);
-                        }           
-                            
+                        } else if (msg.equals("tv power off") && isLGTV) {
+                            isToggleOption = true;
+                            System.exit(0);
+                        }                                      
                     } else {
                         // end of message stream
                         arAgent.close();
@@ -639,9 +650,11 @@ public class AcClient extends JFrame
         if (arAgent.isConnected())
             findArCmd("deregister").send();
         if (isLGTV &&
-            !isRunning(isSurroundOption ? "Audio Control" : "Surround Control")) {
+            (!isRunning(isSurroundOption ? "Audio Control" : "Surround Control") ||
+             isToggleOption)) {
             // this host is connected to an LG TV AND
-            // this is the only control program running
+            // this is the only control program running OR
+            // a "tv power off" message was received
             lgtvPower("off");
         }    
         arAgent.close();
@@ -655,9 +668,6 @@ public class AcClient extends JFrame
     public void windowDeactivated (WindowEvent e) {}
     public void windowActivated (WindowEvent e) {}
     public void windowClosing(WindowEvent e) {
-        if (arAgent.isConnected())
-            findArCmd("deregister").send(); 
-        arAgent.close();
         System.exit(0);
     }
 }

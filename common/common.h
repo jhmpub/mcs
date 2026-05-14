@@ -63,6 +63,10 @@ enum cmdID {
    SURROUND_STD,        
    SURROUND_MAX,
 
+   // audio client commands
+   TV_POWER_OFF,
+   TV_POWER_ON,
+
    // remote commands
    ARROW_DOWN,          // TV: tv down, DVD: dvd down, DVR: keyboard down
    ARROW_UP,            // TV: tv up, DVD: dvd up, DVR: keyboard up

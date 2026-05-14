@@ -1,3 +1,5 @@
+#include "common.h"
+
 // Xantech relay device IR codes
 // ab switch #1     -> sub group 0
 // ab switch #2     -> sub group 1
@@ -1285,6 +1287,19 @@ unsigned char const hdmiSourceInput3[] = {
 
 struct tiraCmd tiraCmd[] = { 
 
+   // audio client commands 
+   {TV_POWER_ON,
+    SZ_TV_POWER_ON,
+    &undefined,
+    0,
+    NULL},
+
+   {TV_POWER_OFF,
+    SZ_TV_POWER_OFF,
+    &undefined,
+    0,
+    NULL},
+   
    // yamaha receiver commands
    {UNDEFINED,
     SZ_UNDEFINED,
