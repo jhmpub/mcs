@@ -16,7 +16,7 @@
 #    (ssh user@server).
 # 5. Challenge Generation: The server finds the client's public key in the 
 #    authorized_keys file. It generates a random challenge (number) and 
-#    encrypts it using the client’s public key.
+#    encrypts it using the client's public key.
 # 6. Challenge Transmission: The encrypted challenge is sent to the client.  
 # 7. Decryption and Verification: The client receives the encrypted challenge
 #    and decrypts it using their private key.
