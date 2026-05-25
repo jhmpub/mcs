@@ -3,7 +3,8 @@ desktop shortcut icon
 
 n.b. steps to configure
 1. wperl.exe must be in the search path
-2. update TV_POWER_PATH variable below for the local installation
+2. update schtask_acClientToggle.bat TV_POWER_PATH variable for the local 
+   installation
 3. run the schtask_acClientToggle.bat file on the htpc
 4. configure ssh between the remote host and the htpc.
    see sshcmd.pl for details
