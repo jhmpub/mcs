@@ -14,7 +14,7 @@ use Win32::GUI;
 
 # begin site specific variables
 my $acClientDir = $ENV{DATA_DRIVE}."\\home\\jhm\\src\\mcs\\util\\acclient";
-my $audioControlMessage = $ENV{DATA_DRIVE}."\\home\\jhm\\src\\mcs\\client\\msg\\msg.exe";
+my $audioControlMessage = $ENV{DATA_DRIVE}."\\home\\jhm\\src\\mcs\\client\\msg\\msgw.exe";
 my $javaw = $ENV{PROGRAM_DRIVE}."\\pkg\\win32\\java\\jdk\\".$ENV{JAVA_VERSION}."\\bin\\javaw.exe";
 my $acAgentHost = "jimson";
 # end site specific variables

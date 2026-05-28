@@ -26,6 +26,7 @@ set OBJ=msg.o socket.o
 %BIN%\gcc -c -g %INC% msg.cpp
 %BIN%\gcc -c -g -o socket.o %INC% %CMN%\socket.cpp
 %BIN%\gcc -static -o msg %OBJ% %LIBS%
+%BIN%\gcc -static -mwindows -o msgw %OBJ% %LIBS%
 
 :DONE
 
