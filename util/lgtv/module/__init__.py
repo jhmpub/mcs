@@ -198,7 +198,7 @@ def main():
                 break
             except ConnectionResetError:
                 if attempt < max_retries - 1:
-                    wait = 10
+                    wait = 5
                     print(f"Retrying in {wait} seconds...")
                     sleep(wait)
                 else:
